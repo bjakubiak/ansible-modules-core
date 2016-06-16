@@ -147,6 +147,11 @@ notes:
     "@development-tools" and environment groups are "@^gnome-desktop-environment".
     Use the "yum group list" command to see which category of group the group
     you want to install falls into.'
+  - This module *requires* root on Spacewalk/RedHat Network enabled machines.
+    Previous versions (<= 2.1.0) incorrectly fell-back to repoquery however without root,
+    their behavior was inconsistent.  A yum warning (running as non-root) will
+    look like, "*Note* Spacewalk repositories are not listed below.  You must run
+    this command as root to access Spacewalk repositories."
 # informational: requirements for nodes
 requirements: [ yum ]
 author:
@@ -1026,32 +1031,32 @@ def main():
 
     params = module.params
 
+    # Create a yum object regardless of our command, as we need to test if rhnplugin is enabled
+    # Checking /etc/yum/pluginconf.d/rhnplugin.conf isn't sufficient
+    # since users can pass a conf_file parameter
+    my = yum_base(params['conf_file'])
+    # A sideeffect of accessing conf is that the configuration is
+    # loaded and plugins are discovered
+    my.conf
+    try:
+        yum_plugins = []
+        yum_plugins = my.plugins._plugins
+    except AttributeError:
+        pass
+
+    # If rhn-plugin is installed and we are not running as root,
+    # users will see an error message using the yum API as follows:
+    #     *Note* Spacewalk repositories are not listed below. You must run this
+    #     command as root to access Spacewalk repositories.
+    if 'rhnplugin' in yum_plugins and os.geteuid() != 0:  # RHN plugin needs root.
+        modules.fail_json(msg="Yum's rhn-plugin is enabled, this module requires root to execute")
+
     if params['list']:
         repoquerybin = ensure_yum_utils(module)
         if not repoquerybin:
             module.fail_json(msg="repoquery is required to use list= with this module. Please install the yum-utils package.")
         results = dict(results=list_stuff(module, repoquerybin, params['conf_file'], params['list']))
-
     else:
-        # If rhn-plugin is installed and no rhn-certificate is available on
-        # the system then users will see an error message using the yum API.
-        # Use repoquery in those cases.
-
-        my = yum_base(params['conf_file'])
-        # A sideeffect of accessing conf is that the configuration is
-        # loaded and plugins are discovered
-        my.conf
-        repoquery = None
-        try:
-            yum_plugins = my.plugins._plugins
-        except AttributeError:
-            pass
-        else:
-            if 'rhnplugin' in yum_plugins:
-                repoquerybin = ensure_yum_utils(module)
-                if repoquerybin:
-                    repoquery = [repoquerybin, '--show-duplicates', '--plugins', '--quiet']
-
         pkg = [ p.strip() for p in params['name']]
         exclude = params['exclude']
         state = params['state']
@@ -1059,10 +1064,7 @@ def main():
         disablerepo = params.get('disablerepo', '')
         disable_gpg_check = params['disable_gpg_check']
         results = ensure(module, state, pkg, params['conf_file'], enablerepo,
-                     disablerepo, disable_gpg_check, exclude, repoquery)
-        if repoquery:
-            results['msg'] = '%s %s' % (results.get('msg',''),
-                    'Warning: Due to potential bad behaviour with rhnplugin and certificates, used slower repoquery calls instead of Yum API.')
+                     disablerepo, disable_gpg_check, exclude, None)
 
     module.exit_json(**results)
 
