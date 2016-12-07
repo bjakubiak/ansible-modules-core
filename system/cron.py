@@ -22,7 +22,7 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
-# Cron Plugin: The goal of this plugin is to provide an indempotent method for
+# Cron Plugin: The goal of this plugin is to provide an idempotent method for
 # setting up cron jobs on a host. The script will play well with other manually
 # entered crons. Each cron job entered will be preceded with a comment
 # describing the job so that it can be found later, which is required to be
@@ -30,6 +30,10 @@
 #
 # This module is based on python-crontab by Martin Owens.
 #
+
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
 
 DOCUMENTATION = """
 ---
@@ -139,7 +143,7 @@ options:
   env:
     description:
       - If set, manages a crontab's environment variable. New variables are added on top of crontab.
-        "name" and "value" paramenters are the name and the value of environment variable.
+        "name" and "value" parameters are the name and the value of environment variable.
     version_added: "2.1"
     required: false
     default: "no"
@@ -171,39 +175,73 @@ author:
 EXAMPLES = '''
 # Ensure a job that runs at 2 and 5 exists.
 # Creates an entry like "0 5,2 * * ls -alh > /dev/null"
-- cron: name="check dirs" minute="0" hour="5,2" job="ls -alh > /dev/null"
+- cron:
+    name: "check dirs"
+    minute: "0"
+    hour: "5,2"
+    job: "ls -alh > /dev/null"
 
 # Ensure an old job is no longer present. Removes any job that is prefixed
 # by "#Ansible: an old job" from the crontab
-- cron: name="an old job" state=absent
+- cron:
+    name: "an old job"
+    state: absent
 
 # Creates an entry like "@reboot /some/job.sh"
-- cron: name="a job for reboot" special_time=reboot job="/some/job.sh"
+- cron:
+    name: "a job for reboot"
+    special_time: reboot
+    job: "/some/job.sh"
 
 # Creates an entry like "PATH=/opt/bin" on top of crontab
-- cron: name=PATH env=yes value=/opt/bin
+- cron:
+    name: PATH
+    env: yes
+    value: /opt/bin
 
 # Creates an entry like "APP_HOME=/srv/app" and insert it after PATH
 # declaration
-- cron: name=APP_HOME env=yes value=/srv/app insertafter=PATH
+- cron:
+    name: APP_HOME
+    env: yes
+    value: /srv/app
+    insertafter: PATH
 
 # Creates a cron file under /etc/cron.d
-- cron: name="yum autoupdate" weekday="2" minute=0 hour=12
-        user="root" job="YUMINTERACTIVE=0 /usr/sbin/yum-autoupdate"
-        cron_file=ansible_yum-autoupdate
+- cron:
+    name: yum autoupdate
+    weekday: 2
+    minute: 0
+    hour: 12
+    user: root
+    job: "YUMINTERACTIVE: 0 /usr/sbin/yum-autoupdate"
+    cron_file: ansible_yum-autoupdate
 
 # Removes a cron file from under /etc/cron.d
-- cron: name="yum autoupdate" cron_file=ansible_yum-autoupdate state=absent
+- cron:
+    name: "yum autoupdate"
+    cron_file: ansible_yum-autoupdate
+    state: absent
 
 # Removes "APP_HOME" environment variable from crontab
-- cron: name=APP_HOME env=yes state=absent
+- cron:
+    name: APP_HOME
+    env: yes
+    state: absent
 '''
 
 import os
+import pwd
 import re
 import tempfile
 import platform
 import pipes
+
+try:
+    import selinux
+    HAS_SELINUX = True
+except ImportError:
+    HAS_SELINUX = False
 
 CRONCMD = "/usr/bin/crontab"
 
@@ -223,6 +261,7 @@ class CronTab(object):
         self.root      = (os.getuid() == 0)
         self.lines     = None
         self.ansible   = "#Ansible: "
+        self.existing  = ''
 
         if cron_file:
             if os.path.isabs(cron_file):
@@ -241,7 +280,8 @@ class CronTab(object):
             # read the cronfile
             try:
                 f = open(self.cron_file, 'r')
-                self.lines = f.read().splitlines()
+                self.existing = f.read()
+                self.lines = self.existing.splitlines()
                 f.close()
             except IOError:
                 # cron file does not exist
@@ -255,6 +295,8 @@ class CronTab(object):
             if rc != 0 and rc != 1: # 1 can mean that there are no jobs.
                 raise CronTabError("Unable to read crontab")
 
+            self.existing = out
+
             lines = out.splitlines()
             count = 0
             for l in lines:
@@ -262,6 +304,9 @@ class CronTab(object):
                                  not re.match( r'# \(/tmp/.*installed on.*\)', l) and
                                  not re.match( r'# \(.*version.*\)', l)):
                     self.lines.append(l)
+                else:
+                    pattern = re.escape(l) + '[\r\n]?'
+                    self.existing = re.sub(pattern, '', self.existing, 1)
                 count += 1
 
     def is_empty(self):
@@ -299,9 +344,16 @@ class CronTab(object):
             if rc != 0:
                 self.module.fail_json(msg=err)
 
+        # set SELinux permissions
+        if HAS_SELINUX:
+            selinux.selinux_lsetfilecon_default(self.cron_file)
+
+    def do_comment(self, name):
+        return "%s%s" % (self.ansible, name)
+
     def add_job(self, name, job):
         # Add the comment
-        self.lines.append("%s%s" % (self.ansible, name))
+        self.lines.append(self.do_comment(name))
 
         # Add the job
         self.lines.append("%s" % (job))
@@ -362,7 +414,8 @@ class CronTab(object):
         except:
             raise CronTabError("Unexpected error:", sys.exc_info()[0])
 
-    def find_job(self, name):
+    def find_job(self, name, job=None):
+        # attempt to find job by 'Ansible:' header comment
         comment = None
         for l in self.lines:
             if comment is not None:
@@ -372,6 +425,19 @@ class CronTab(object):
                     comment = None
             elif re.match( r'%s' % self.ansible, l):
                 comment = re.sub( r'%s' % self.ansible, '', l)
+
+        # failing that, attempt to find job by exact match
+        if job:
+            for i, l in enumerate(self.lines):
+                if l == job:
+                    # if no leading ansible header, insert one
+                    if not re.match( r'%s' % self.ansible, self.lines[i-1]):
+                        self.lines.insert(i, self.do_comment(name))
+                        return [self.lines[i], l, True]
+                    # if a leading blank ansible header AND job has a name, update header
+                    elif name and self.lines[i-1] == self.do_comment(None):
+                        self.lines[i-1] = self.do_comment(name)
+                        return [self.lines[i-1], l, True]
 
         return []
 
@@ -383,6 +449,9 @@ class CronTab(object):
         return []
 
     def get_cron_job(self,minute,hour,day,month,weekday,job,special,disabled):
+        # normalize any leading/trailing newlines (ansible/ansible-modules-core#3791)
+        job = job.strip('\r\n')
+
         if disabled:
             disable_prefix = '#'
         else:
@@ -420,7 +489,7 @@ class CronTab(object):
         return envnames
 
     def _update_job(self, name, job, addlinesfunction):
-        ansiblename = "%s%s" % (self.ansible, name)
+        ansiblename = self.do_comment(name)
         newlines = []
         comment = None
 
@@ -460,8 +529,8 @@ class CronTab(object):
             crons.append(cron)
 
         result = '\n'.join(crons)
-        if result and result[-1] not in ['\n', '\r']:
-            result += '\n'
+        if result:
+            result = result.rstrip('\r\n') + '\n'
         return result
 
     def _read_user_execute(self):
@@ -476,7 +545,7 @@ class CronTab(object):
                 return "%s -l %s" % (pipes.quote(CRONCMD), pipes.quote(self.user))
             elif platform.system() == 'HP-UX':
                 return "%s %s %s" % (CRONCMD , '-l', pipes.quote(self.user))
-            else:
+            elif pwd.getpwuid(os.getuid())[0] != self.user:
                 user = '-u %s' % pipes.quote(self.user)
         return "%s %s %s" % (CRONCMD , user, '-l')
 
@@ -488,7 +557,7 @@ class CronTab(object):
         if self.user:
             if platform.system() in ['SunOS', 'HP-UX', 'AIX']:
                 return "chown %s %s ; su '%s' -c '%s %s'" % (pipes.quote(self.user), pipes.quote(path), pipes.quote(self.user), CRONCMD, pipes.quote(path))
-            else:
+            elif pwd.getpwuid(os.getuid())[0] != self.user:
                 user = '-u %s' % pipes.quote(self.user)
         return "%s %s %s" % (CRONCMD , user, pipes.quote(path))
 
@@ -577,7 +646,7 @@ def main():
 
     if module._diff:
         diff = dict()
-        diff['before'] = crontab.render()
+        diff['before'] = crontab.existing
         if crontab.cron_file:
             diff['before_header'] = crontab.cron_file
         else:
@@ -641,20 +710,30 @@ def main():
                 crontab.remove_env(name)
                 changed = True
     else:
-        job = crontab.get_cron_job(minute, hour, day, month, weekday, job, special_time, disabled)
-        old_job = crontab.find_job(name)
-
         if do_install:
+            job = crontab.get_cron_job(minute, hour, day, month, weekday, job, special_time, disabled)
+            old_job = crontab.find_job(name, job)
+
             if len(old_job) == 0:
                 crontab.add_job(name, job)
                 changed = True
             if len(old_job) > 0 and old_job[1] != job:
                 crontab.update_job(name, job)
                 changed = True
+            if len(old_job) > 2:
+                crontab.update_job(name, job)
+                changed = True
         else:
+            old_job = crontab.find_job(name)
+
             if len(old_job) > 0:
                 crontab.remove_job(name)
                 changed = True
+
+    # no changes to env/job, but existing crontab needs a terminating newline
+    if not changed:
+        if not (crontab.existing.endswith('\r') or crontab.existing.endswith('\n')):
+            changed = True
 
     res_args = dict(
         jobs = crontab.get_jobnames(),
@@ -696,5 +775,5 @@ def main():
 # import module snippets
 from ansible.module_utils.basic import *
 
-main()
-
+if __name__ == '__main__':
+    main()

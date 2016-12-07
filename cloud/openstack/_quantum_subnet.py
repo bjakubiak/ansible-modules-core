@@ -26,6 +26,10 @@ try:
 except ImportError:
     HAVE_DEPS = False
 
+ANSIBLE_METADATA = {'status': ['deprecated'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: quantum_subnet
@@ -54,7 +58,7 @@ options:
      description:
         - The keystone URL for authentication
      required: false
-     default: 'http://127.0.0.1:35357/v2.0/'
+     default: http://127.0.0.1:35357/v2.0/
    region_name:
      description:
         - Name of the region
@@ -123,10 +127,16 @@ requirements:
 '''
 
 EXAMPLES = '''
-# Create a subnet for a tenant with the specified subnet
-- quantum_subnet: state=present login_username=admin login_password=admin
-                  login_tenant_name=admin tenant_name=tenant1
-                  network_name=network1 name=net1subnet cidr=192.168.0.0/24"
+- name: Create a subnet for a tenant with the specified subnet
+  quantum_subnet:
+    state: present
+    login_username: admin
+    login_password: admin
+    login_tenant_name: admin
+    tenant_name: tenant1
+    network_name: network1
+    name: net1subnet
+    cidr: 192.168.0.0/24
 '''
 
 _os_keystone   = None

@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: ec2_vpc_net
@@ -25,7 +29,7 @@ author: Jonathan Davila (@defionscode)
 options:
   name:
     description:
-      - The name to give your VPC. This is used in combination with the cidr_block paramater to determine if a VPC already exists.
+      - The name to give your VPC. This is used in combination with the cidr_block parameter to determine if a VPC already exists.
     required: yes
   cidr_block:
     description:
@@ -146,7 +150,8 @@ def update_vpc_tags(vpc, module, vpc_obj, tags, name):
     try:
         current_tags = dict((t.name, t.value) for t in vpc.get_all_tags(filters={'resource-id': vpc_obj.id}))
         if cmp(tags, current_tags):
-            vpc.create_tags(vpc_obj.id, tags)
+            if not module.check_mode:
+                vpc.create_tags(vpc_obj.id, tags)
             return True
         else:
             return False
@@ -158,7 +163,8 @@ def update_vpc_tags(vpc, module, vpc_obj, tags, name):
 def update_dhcp_opts(connection, module, vpc_obj, dhcp_id):
 
     if vpc_obj.dhcp_options_id != dhcp_id:
-        connection.associate_dhcp_options(dhcp_id, vpc_obj.id)
+        if not module.check_mode:
+            connection.associate_dhcp_options(dhcp_id, vpc_obj.id)
         return True
     else:
         return False
@@ -194,6 +200,7 @@ def main():
 
     module = AnsibleModule(
         argument_spec=argument_spec,
+        supports_check_mode=True
     )
 
     if not HAS_BOTO:
@@ -231,8 +238,11 @@ def main():
 
         if vpc_obj is None:
             try:
-                vpc_obj = connection.create_vpc(cidr_block, instance_tenancy=tenancy)
                 changed = True
+                if not module.check_mode:
+                    vpc_obj = connection.create_vpc(cidr_block, instance_tenancy=tenancy)
+                else:
+                    module.exit_json(changed=changed)
             except BotoServerError as e:
                 module.fail_json(msg=e)
 
@@ -254,18 +264,20 @@ def main():
         # which is needed in order to detect the current status of DNS options. For now we just update
         # the attribute each time and is not used as a changed-factor.
         try:
-            connection.modify_vpc_attribute(vpc_obj.id, enable_dns_support=dns_support)
-            connection.modify_vpc_attribute(vpc_obj.id, enable_dns_hostnames=dns_hostnames)
+            if not module.check_mode:
+                connection.modify_vpc_attribute(vpc_obj.id, enable_dns_support=dns_support)
+                connection.modify_vpc_attribute(vpc_obj.id, enable_dns_hostnames=dns_hostnames)
         except BotoServerError as e:
             e_msg=boto_exception(e)
             module.fail_json(msg=e_msg)
 
-        # get the vpc obj again in case it has changed
-        try:
-            vpc_obj = connection.get_all_vpcs(vpc_obj.id)[0]
-        except BotoServerError as e:
-            e_msg=boto_exception(e)
-            module.fail_json(msg=e_msg)
+        if not module.check_mode:
+            # get the vpc obj again in case it has changed
+            try:
+                vpc_obj = connection.get_all_vpcs(vpc_obj.id)[0]
+            except BotoServerError as e:
+                e_msg=boto_exception(e)
+                module.fail_json(msg=e_msg)
 
         module.exit_json(changed=changed, vpc=get_vpc_values(vpc_obj))
 
@@ -276,7 +288,8 @@ def main():
 
         if vpc_obj is not None:
             try:
-                connection.delete_vpc(vpc_obj.id)
+                if not module.check_mode:
+                    connection.delete_vpc(vpc_obj.id)
                 vpc_obj = None
                 changed = True
             except BotoServerError as e:

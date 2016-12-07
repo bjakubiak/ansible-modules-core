@@ -15,6 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: acl
@@ -78,7 +82,7 @@ options:
     required: false
     default: null
     description:
-      - DEPRECATED. The acl to set or remove.  This must always be quoted in the form of '<etype>:<qualifier>:<perms>'.  The qualifier may be empty for some types, but the type and perms are always requried. '-' can be used as placeholder when you do not care about permissions. This is now superseded by entity, type and permissions fields.
+      - DEPRECATED. The acl to set or remove.  This must always be quoted in the form of '<etype>:<qualifier>:<perms>'.  The qualifier may be empty for some types, but the type and perms are always required. '-' can be used as placeholder when you do not care about permissions. This is now superseded by entity, type and permissions fields.
 
   recursive:
     version_added: "2.0"
@@ -97,19 +101,38 @@ notes:
 
 EXAMPLES = '''
 # Grant user Joe read access to a file
-- acl: name=/etc/foo.conf entity=joe etype=user permissions="r" state=present
+- acl:
+    name: /etc/foo.conf
+    entity: joe
+    etype: user
+    permissions: r
+    state: present
 
 # Removes the acl for Joe on a specific file
-- acl: name=/etc/foo.conf entity=joe etype=user state=absent
+- acl:
+    name: /etc/foo.conf
+    entity: joe
+    etype: user
+    state: absent
 
 # Sets default acl for joe on foo.d
-- acl: name=/etc/foo.d entity=joe etype=user permissions=rw default=yes state=present
+- acl:
+    name: /etc/foo.d
+    entity: joe
+    etype: user
+    permissions: rw
+    default: yes
+    state: present
 
 # Same as previous but using entry shorthand
-- acl: name=/etc/foo.d entry="default:user:joe:rw-" state=present
+- acl:
+    name: /etc/foo.d
+    entry: "default:user:joe:rw-"
+    state: present
 
 # Obtain the acl for a specific file
-- acl: name=/etc/foo.conf
+- acl:
+    name: /etc/foo.conf
   register: acl_info
 '''
 
@@ -152,8 +175,10 @@ def split_entry(entry):
     return [d, t, e, p]
 
 
-def build_entry(etype, entity, permissions=None):
+def build_entry(etype, entity, permissions=None, use_nfsv4_acls=False):
     '''Builds and returns an entry string. Does not include the permissions bit if they are not provided.'''
+    if use_nfsv4_acls:
+        return ':'.join([etype, entity, permissions, 'allow'])
     if permissions:
         return etype + ':' + entity + ':' + permissions
     else:
@@ -171,14 +196,18 @@ def build_command(module, mode, path, follow, default, recursive, entry=''):
     else:  # mode == 'get'
         cmd = [module.get_bin_path('getfacl', True)]
         # prevents absolute path warnings and removes headers
-        cmd.append('--omit-header')
-        cmd.append('--absolute-names')
+        if get_platform().lower() == 'linux':
+            cmd.append('--omit-header')
+            cmd.append('--absolute-names')
 
     if recursive:
         cmd.append('--recursive')
 
     if not follow:
-        cmd.append('--physical')
+        if get_platform().lower() == 'linux':
+            cmd.append('--physical')
+        elif get_platform().lower() == 'freebsd':
+            cmd.append('-h')
 
     if default:
         if(mode == 'rm'):
@@ -192,7 +221,11 @@ def build_command(module, mode, path, follow, default, recursive, entry=''):
 
 def acl_changed(module, cmd):
     '''Returns true if the provided command affects the existing ACLs, false otherwise.'''
-    cmd = cmd[:]  # lists are mutables so cmd would be overriden without this
+    # FreeBSD do not have a --test flag, so by default, it is safer to always say "true"
+    if get_platform().lower() == 'freebsd':
+        return True
+
+    cmd = cmd[:]  # lists are mutables so cmd would be overwritten without this
     cmd.insert(1, '--test')
     lines = run_acl(module, cmd)
 
@@ -210,7 +243,11 @@ def run_acl(module, cmd, check_rc=True):
         e = get_exception()
         module.fail_json(msg=e.strerror)
 
-    lines = out.splitlines()
+    lines = []
+    for l in out.splitlines():
+        if not l.startswith('#'):
+            lines.append(l.strip())
+
     if lines and not lines[-1].split():
         # trim last line only when it is empty
         return lines[:-1]
@@ -239,12 +276,13 @@ def main():
             follow=dict(required=False, type='bool', default=True),
             default=dict(required=False, type='bool', default=False),
             recursive=dict(required=False, type='bool', default=False),
+            use_nfsv4_acls=dict(required=False, type='bool', default=False)
         ),
         supports_check_mode=True,
     )
 
-    if get_platform().lower() != 'linux':
-        module.fail_json(msg="The acl module is only available for Linux distributions.")
+    if get_platform().lower() not in ['linux', 'freebsd']:
+        module.fail_json(msg="The acl module is not available on this system.")
 
     path = module.params.get('name')
     entry = module.params.get('entry')
@@ -255,6 +293,7 @@ def main():
     follow = module.params.get('follow')
     default = module.params.get('default')
     recursive = module.params.get('recursive')
+    use_nfsv4_acls = module.params.get('use_nfsv4_acls')
 
     if not os.path.exists(path):
         module.fail_json(msg="Path not found or not accessible.")
@@ -289,11 +328,15 @@ def main():
         if default_flag != None:
             default = default_flag
 
+    if get_platform().lower() == 'freebsd':
+        if recursive:
+            module.fail_json(msg="recursive is not supported on that platform.")
+
     changed = False
     msg = ""
 
     if state == 'present':
-        entry = build_entry(etype, entity, permissions)
+        entry = build_entry(etype, entity, permissions, use_nfsv4_acls)
         command = build_command(
             module, 'set', path, follow,
             default, recursive, entry
@@ -305,7 +348,7 @@ def main():
         msg = "%s is present" % entry
 
     elif state == 'absent':
-        entry = build_entry(etype, entity)
+        entry = build_entry(etype, entity, use_nfsv4_acls)
         command = build_command(
             module, 'rm', path, follow,
             default, recursive, entry
@@ -329,4 +372,5 @@ def main():
 # import module snippets
 from ansible.module_utils.basic import *
 
-main()
+if __name__ == '__main__':
+    main()

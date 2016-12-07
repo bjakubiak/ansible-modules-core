@@ -26,6 +26,10 @@ try:
 except ImportError:
     HAVE_DEPS = False
 
+ANSIBLE_METADATA = {'status': ['deprecated'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: quantum_router_gateway
@@ -55,7 +59,7 @@ options:
      description:
         - The keystone URL for authentication
      required: false
-     default: 'http://127.0.0.1:35357/v2.0/'
+     default: http://127.0.0.1:35357/v2.0/
    region_name:
      description:
         - Name of the region
@@ -83,10 +87,14 @@ requirements:
 '''
 
 EXAMPLES = '''
-# Attach an external network with a router to allow flow of external traffic
-- quantum_router_gateway: state=present login_username=admin login_password=admin
-                          login_tenant_name=admin router_name=external_router
-                          network_name=external_network
+- name: Attach an external network with a router to allow flow of external traffic
+  quantum_router_gateway:
+    state: present
+    login_username: admin
+    login_password: admin
+    login_tenant_name: admin
+    router_name: external_router
+    network_name: external_network
 '''
 
 _os_keystone = None

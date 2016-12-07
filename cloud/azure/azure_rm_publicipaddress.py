@@ -19,6 +19,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: azure_rm_publicipaddress
@@ -125,8 +129,6 @@ except ImportError:
     # This is handled in azure_rm_common
     pass
 
-NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,61}[a-z0-9]$")
-
 
 def pip_to_dict(pip):
     result = dict(
@@ -134,7 +136,7 @@ def pip_to_dict(pip):
         type=pip.type,
         location=pip.location,
         tags=pip.tags,
-        public_ip_allocation_method=pip.public_ip_allocation_method.value,
+        public_ip_allocation_method=pip.public_ip_allocation_method,
         dns_settings=dict(),
         ip_address=pip.ip_address,
         idle_timeout_in_minutes=pip.idle_timeout_in_minutes,
@@ -190,10 +192,6 @@ class AzureRMPublicIPAddress(AzureRMModuleBase):
         if not self.location:
             # Set default location
             self.location = resource_group.location
-
-        if not NAME_PATTERN.match(self.name):
-            self.fail("Parameter error: name must begin with a letter or number, end with a letter or number "
-                      "and contain at least one number.")
 
         try:
             self.log("Fetch public ip {0}".format(self.name))

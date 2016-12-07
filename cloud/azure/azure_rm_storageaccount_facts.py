@@ -19,6 +19,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: azure_rm_storageaccount_facts
@@ -74,16 +78,11 @@ EXAMPLES = '''
 '''
 
 RETURN = '''
-changed:
-    description: Whether or not the object was changed.
-    returned: always
-    type: bool
-    sample: False
-objects:
-    description: List containing a set of facts for each selected object.
+azure_storageaccounts:
+    description: List of storage account dicts.
     returned: always
     type: list
-    sample: [{
+    example: [{
         "id": "/subscriptions/XXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXX/resourceGroups/testing/providers/Microsoft.Storage/storageAccounts/testaccount001",
         "location": "eastus2",
         "name": "testaccount001",
@@ -130,7 +129,7 @@ class AzureRMStorageAccountFacts(AzureRMModuleBase):
 
         self.results = dict(
             changed=False,
-            objects=[]
+            ansible_facts=dict(azure_storageaccounts=[])
         )
 
         self.name = None
@@ -150,11 +149,11 @@ class AzureRMStorageAccountFacts(AzureRMModuleBase):
             self.fail("Parameter error: resource group required when filtering by name.")
 
         if self.name:
-            self.results['objects'] = self.get_account()
+            self.results['ansible_facts']['azure_storageaccounts'] = self.get_account()
         elif self.resource_group:
-            self.results['objects'] = self.list_resource_group()
+            self.results['ansible_facts']['azure_storageaccounts'] = self.list_resource_group()
         else:
-            self.results['objects'] = self.list_all()
+            self.results['ansible_facts']['azure_storageaccounts'] = self.list_all()
 
         return self.results
 

@@ -18,6 +18,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: group
@@ -53,7 +57,9 @@ options:
 
 EXAMPLES = '''
 # Example group command from Ansible Playbooks
-- group: name=somegroup state=present
+- group:
+    name: somegroup
+    state: present
 '''
 
 import grp
@@ -144,7 +150,7 @@ class SunOS(Group):
 
     This overrides the following methods from the generic class:-
         - group_add()
-    """ 
+    """
 
     platform = 'SunOS'
     distribution = None
@@ -258,7 +264,7 @@ class DarwinGroup(Group):
       - group_add()
       - group_mod()
 
-    group manupulation are done using dseditgroup(1).
+    group manipulation are done using dseditgroup(1).
     """
 
     platform = 'Darwin'
@@ -269,6 +275,11 @@ class DarwinGroup(Group):
         cmd += [ '-o', 'create' ]
         if self.gid is not None:
             cmd += [ '-i', self.gid ]
+        elif 'system' in kwargs and kwargs['system'] == True:
+            gid = self.get_lowest_available_system_gid()
+            if gid != False:
+                self.gid = str(gid)
+                cmd += [ '-i', self.gid ]
         cmd += [ '-L', self.name ]
         (rc, out, err) = self.execute_command(cmd)
         return (rc, out, err)
@@ -291,6 +302,26 @@ class DarwinGroup(Group):
             (rc, out, err) = self.execute_command(cmd)
             return (rc, out, err)
         return (None, '', '')
+    
+    def get_lowest_available_system_gid(self):
+        # check for lowest available system gid (< 500)
+        try:
+            cmd = [self.module.get_bin_path('dscl', True)]
+            cmd += [ '/Local/Default', '-list', '/Groups', 'PrimaryGroupID']
+            (rc, out, err) = self.execute_command(cmd)
+            lines = out.splitlines()
+            highest = 0
+            for group_info in lines:
+                parts = group_info.split(' ')
+                if len(parts) > 1:
+                    gid = int(parts[-1])
+                    if gid > highest and gid < 500:
+                        highest = gid
+            if highest == 0 or highest == 499:
+                return False
+            return (highest + 1)
+        except:
+            return False
 
 class OpenBsdGroup(Group):
     """
@@ -439,4 +470,6 @@ def main():
 
 # import module snippets
 from ansible.module_utils.basic import *
-main()
+
+if __name__ == '__main__':
+    main()

@@ -25,6 +25,10 @@ import datetime
 import re
 import tempfile
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: get_url
@@ -101,7 +105,7 @@ options:
         If you worry about portability, only the sha1 algorithm is available
         on all platforms and python versions.  The third party hashlib
         library can be installed for access to additional algorithms.
-        Additionaly, if a checksum is passed to this parameter, and the file exist under
+        Additionally, if a checksum is passed to this parameter, and the file exist under
         the C(dest) location, the destination_checksum would be calculated, and if
         checksum equals destination_checksum, the file download would be skipped
         (unless C(force) is true). '
@@ -169,20 +173,39 @@ author: "Jan-Piet Mens (@jpmens)"
 
 EXAMPLES='''
 - name: download foo.conf
-  get_url: url=http://example.com/path/file.conf dest=/etc/foo.conf mode=0440
+  get_url: 
+    url: http://example.com/path/file.conf 
+    dest: /etc/foo.conf 
+    mode: 0440
 
 - name: download file and force basic auth
-  get_url: url=http://example.com/path/file.conf dest=/etc/foo.conf force_basic_auth=yes
+  get_url: 
+    url: http://example.com/path/file.conf 
+    dest: /etc/foo.conf 
+    force_basic_auth: yes
 
 - name: download file with custom HTTP headers
-  get_url: url=http://example.com/path/file.conf dest=/etc/foo.conf headers='key:value,key:value'
+  get_url: 
+    url: http://example.com/path/file.conf 
+    dest: /etc/foo.conf 
+    headers: 'key:value,key:value'
 
-- name: download file with check
-  get_url: url=http://example.com/path/file.conf dest=/etc/foo.conf checksum=sha256:b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c
-  get_url: url=http://example.com/path/file.conf dest=/etc/foo.conf checksum=md5:66dffb5228a211e61d6d7ef4a86f5758
+- name: download file with check (sha256)
+  get_url: 
+    url: http://example.com/path/file.conf 
+    dest: /etc/foo.conf 
+    checksum: sha256:b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c
+
+- name: download file with check (md5)
+  get_url: 
+    url: http://example.com/path/file.conf 
+    dest: /etc/foo.conf
+    checksum: md5:66dffb5228a211e61d6d7ef4a86f5758
 
 - name: download file from a file path
-  get_url: url="file:///tmp/afile.txt" dest=/tmp/afilecopy.txt  
+  get_url: 
+    url: "file:///tmp/afile.txt" 
+    dest: /tmp/afilecopy.txt  
 '''
 
 from ansible.module_utils.six.moves.urllib.parse import urlsplit
@@ -208,10 +231,14 @@ def url_get(module, url, dest, use_proxy, last_mod_time, force, timeout=10, head
     if info['status'] == 304:
         module.exit_json(url=url, dest=dest, changed=False, msg=info.get('msg', ''))
 
-    # create a temporary file and copy content to do checksum-based replacement
-    if info['status'] != 200 and not url.startswith('file:/'):
+    # Exceptions in fetch_url may result in a status -1, the ensures a proper error to the user in all cases
+    if info['status'] == -1:
+        module.fail_json(msg=info['msg'], url=url, dest=dest)
+
+    if info['status'] != 200 and not url.startswith('file:/') and not (url.startswith('ftp:/') and info.get('msg', '').startswith('OK')):
         module.fail_json(msg="Request failed", status_code=info['status'], response=info['msg'], url=url, dest=dest)
 
+    # create a temporary file and copy content to do checksum-based replacement
     if tmp_dest != '':
         # tmp_dest should be an existing dir
         tmp_dest_is_dir = os.path.isdir(tmp_dest)
@@ -219,7 +246,7 @@ def url_get(module, url, dest, use_proxy, last_mod_time, force, timeout=10, head
             if os.path.exists(tmp_dest):
                 module.fail_json(msg="%s is a file but should be a directory." % tmp_dest)
             else:
-                module.fail_json(msg="%s directoy does not exist." % tmp_dest)
+                module.fail_json(msg="%s directory does not exist." % tmp_dest)
 
         fd, tempname = tempfile.mkstemp(dir=tmp_dest)
     else:
@@ -291,7 +318,7 @@ def main():
     # Parse headers to dict
     if module.params['headers']:
         try:
-            headers = dict(item.split(':') for item in module.params['headers'].split(','))
+            headers = dict(item.split(':', 1) for item in module.params['headers'].split(','))
         except:
             module.fail_json(msg="The header parameter requires a key:value,key:value syntax to be properly parsed.")
     else:
@@ -345,6 +372,11 @@ def main():
         # request.
         mtime = os.path.getmtime(dest)
         last_mod_time = datetime.datetime.utcfromtimestamp(mtime)
+
+        # If the checksum does not match we have to force the download
+        # because last_mod_time may be newer than on remote
+        if checksum_mismatch:
+            force = True
 
     # download to tmpsrc
     tmpsrc, info = url_get(module, url, dest, use_proxy, last_mod_time, force, timeout, headers, tmp_dest)

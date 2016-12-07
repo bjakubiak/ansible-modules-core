@@ -18,6 +18,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: selinux
@@ -49,9 +53,19 @@ author: "Derek Carter (@goozbach) <goozbach@friocorte.com>"
 '''
 
 EXAMPLES = '''
-- selinux: policy=targeted state=enforcing
-- selinux: policy=targeted state=permissive
-- selinux: state=disabled
+# Enable SELinux
+- selinux:
+    policy: targeted
+    state: enforcing
+
+# Put SELinux in permissive mode, logging actions that would be blocked.
+- selinux:
+    policy: targeted
+    state: permissive
+
+# Disable SELinux
+- selinux:
+    state: disabled
 '''
 
 import os

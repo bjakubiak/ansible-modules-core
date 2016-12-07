@@ -17,6 +17,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: docker_container
@@ -40,9 +44,15 @@ options:
       - List of capabilities to add to the container.
     default: null
     required: false
+  cleanup:
+    description:
+      - Use with I(detach) to remove the container after successful execution.
+    default: false
+    required: false
+    version_added: "2.2"
   command:
     description:
-      - Command or list of commands to execute in the container when it starts.
+      - Command to execute when the container starts.
     default: null
     required: false
   cpu_period:
@@ -107,7 +117,7 @@ options:
     required: false
   entrypoint:
     description:
-      - String or list of commands that overwrite the default ENTRYPOINT of the image.
+      - Command that overwrites the default ENTRYPOINT of the image.
     default: null
     required: false
   etc_hosts:
@@ -118,9 +128,10 @@ options:
     required: false
   exposed_ports:
     description:
-      - List of additional container ports to expose for port mappings or links.
+      - List of additional container ports which informs Docker that the container
+        listens on the specified network ports at runtime.
         If the port is already exposed using EXPOSE in a Dockerfile, it does not
-        need to be xposed again.
+        need to be exposed again.
     default: null
     required: false
     aliases:
@@ -144,10 +155,11 @@ options:
     description:
       - When C(state) is I(present) or I(started) the module compares the configuration of an existing
         container to requested configuration. The evaluation includes the image version. If
-        the image vesion in the registry does not match the container, the container will be
+        the image version in the registry does not match the container, the container will be
         recreated. Stop this behavior by setting C(ignore_image) to I(True).
     default: false
     required: false
+    version_added: "2.2"      
   image:
     description:
       - Repository path and tag used to create the container. If an image is not found or pull is true, the image
@@ -193,7 +205,7 @@ options:
     required: false
   log_driver:
     description:
-      - Specify the logging driver.
+      - Specify the logging driver. Docker uses json-file by default.
     choices:
       - json-file
       - syslog
@@ -202,7 +214,7 @@ options:
       - fluentd
       - awslogs
       - splunk
-    defult: json-file
+    default: null
     required: false
   log_options:
     description:
@@ -269,6 +281,12 @@ options:
       - Whether or not to disable OOM Killer for the container.
     default: false
     required: false
+  oom_score_adj:
+    description:
+      - An integer value containing the score given to the container in order to tune OOM killer preferences.
+    default: 0
+    required: false
+    version_added: "2.2"
   paused:
     description:
       - Use with the started state to pause running processes inside the container.
@@ -276,7 +294,7 @@ options:
     required: false
   pid_mode:
     description:
-      - Set the PID namespace mode for the container. Currenly only supports 'host'.
+      - Set the PID namespace mode for the container. Currently only supports 'host'.
     default: null
     required: false
   privileged:
@@ -292,6 +310,12 @@ options:
       - Container ports must be exposed either in the Dockerfile or via the C(expose) option.
       - A value of ALL will publish all exposed container ports to random host ports, ignoring
         any other mappings.
+      - If C(networks) parameter is provided, will inspect each network to see if there exists
+        a bridge network with optional parameter com.docker.network.bridge.host_binding_ipv4.
+        If such a network is found, then published ports where no host IP address is specified 
+        will be bound to the host IP pointed to by com.docker.network.bridge.host_binding_ipv4.
+        Note that the first bridge network with a com.docker.network.bridge.host_binding_ipv4 
+        value encountered in the list of C(networks) is the one that will be used. 
     aliases:
       - ports
     required: false
@@ -342,7 +366,7 @@ options:
     description:
       - Size of `/dev/shm`. The format is `<number><unit>`. `number` must be greater than `0`.
         Unit is optional and can be `b` (bytes), `k` (kilobytes), `m` (megabytes), or `g` (gigabytes).
-      - Ommitting the unit defaults to bytes. If you omit the size entirely, the system uses `64m`.
+      - Omitting the unit defaults to bytes. If you omit the size entirely, the system uses `64m`.
     default: null
     required: false
   security_opts:
@@ -354,7 +378,7 @@ options:
     description:
       - 'I(absent) - A container matching the specified name will be stopped and removed. Use force_kill to kill the container
          rather than stopping it. Use keep_volumes to retain volumes associated with the removed container.'
-      - 'I(present)" - Asserts the existence of a container matching the name and any provided configuration parameters. If no
+      - 'I(present) - Asserts the existence of a container matching the name and any provided configuration parameters. If no
         container matches the name, a container will be created. If a container matches the name but the provided configuration
         does not match, the container will be updated, if it can be. If it cannot be updated, it will be removed and re-created
         with the requested config. Image version will be taken into account when comparing configuration. To ignore image
@@ -392,7 +416,7 @@ options:
     description:
       - If true, skip image verification.
     default: false
-    requried: false
+    required: false
   tty:
     description:
       - Allocate a psuedo-TTY.
@@ -425,7 +449,7 @@ options:
     required: false
   volume_driver:
     description:
-      - The container's volume driver.
+      - The container volume driver.
     default: none
     required: false
   volumes_from:
@@ -495,7 +519,7 @@ EXAMPLES = '''
     image: ubuntu:14.04
     command: sleep infinity 
 
-- name: Stop a contianer
+- name: Stop a container
   docker_container:
     name: mycontainer
     state: stopped
@@ -551,7 +575,6 @@ EXAMPLES = '''
 
 - name: Add container to networks
   docker_container:
-    docker_container:
     name: sleepy
     networks:
       - name: TestingNet
@@ -586,7 +609,11 @@ EXAMPLES = '''
 
 RETURN = '''
 ansible_docker_container:
-    description: Facts representing the current state of the container. Note that facts are not part of registered vars but accessible directly.
+    description:
+      - Facts representing the current state of the container. Matches the docker inspection output.
+      - Note that facts are not part of registered vars but accessible directly.
+      - Empty if C(state) is I(absent)
+      - If detached is I(False), will include Output attribute containing any output from container run.
     returned: always
     type: dict
     sample: '{
@@ -655,6 +682,7 @@ class TaskParameters(DockerBaseClass):
 
         self.blkio_weight = None
         self.capabilities = None
+        self.cleanup = None
         self.command = None
         self.cpu_period = None
         self.cpu_quota = None
@@ -662,6 +690,7 @@ class TaskParameters(DockerBaseClass):
         self.cpuset_mems = None
         self.cpu_shares = None
         self.detach = None
+        self.debug = None
         self.devices = None
         self.dns_servers = None
         self.dns_opts = None
@@ -674,6 +703,7 @@ class TaskParameters(DockerBaseClass):
         self.force_kill = None
         self.groups = None
         self.hostname = None
+        self.ignore_image = None
         self.image = None
         self.interactive = None
         self.ipc_mode = None
@@ -693,6 +723,7 @@ class TaskParameters(DockerBaseClass):
         self.network_mode = None
         self.networks = None
         self.oom_killer = None
+        self.oom_score_adj = None
         self.paused = None
         self.pid_mode = None
         self.privileged = None
@@ -727,14 +758,15 @@ class TaskParameters(DockerBaseClass):
                 except ValueError as exc:
                     self.fail("Failed to convert %s to bytes: %s" % (param_name, exc))
 
+        self.publish_all_ports = False
         self.published_ports = self._parse_publish_ports()
-        self.ports = self._parse_exposed_ports(self.published_ports)
-        self.log("expose ports:")
-        self.log(self.ports, pretty_print=True)
-        self.publish_all_ports = None
         if self.published_ports == 'all':
             self.publish_all_ports = True
             self.published_ports = None
+
+        self.ports = self._parse_exposed_ports(self.published_ports)
+        self.log("expose ports:")
+        self.log(self.ports, pretty_print=True)
 
         self.links = self._parse_links(self.links)
 
@@ -888,6 +920,7 @@ class TaskParameters(DockerBaseClass):
             mem_limit='memory',
             memswap_limit='memory_swap',
             mem_swappiness='memory_swappiness',
+            oom_score_adj='oom_score_adj',
             shm_size='shm_size',
             group_add='groups',
             devices='devices',
@@ -904,6 +937,20 @@ class TaskParameters(DockerBaseClass):
 
         return self.client.create_host_config(**params)
 
+    @property
+    def default_host_ip(self):
+        ip = '0.0.0.0'
+        if not self.networks:
+            return ip
+        for net in self.networks:
+            if net.get('name'):
+                network = self.client.inspect_network(net['name'])
+                if network.get('Driver') == 'bridge' and \
+                   network.get('Options', {}).get('com.docker.network.bridge.host_binding_ipv4'):
+                    ip = network['Options']['com.docker.network.bridge.host_binding_ipv4']
+                    break
+        return ip
+
     def _parse_publish_ports(self):
         '''
         Parse ports from docker CLI syntax
@@ -914,6 +961,8 @@ class TaskParameters(DockerBaseClass):
         if 'all' in self.published_ports:
             return 'all'
 
+        default_ip = self.default_host_ip
+
         binds = {}
         for port in self.published_ports:
             parts = str(port).split(':')
@@ -923,9 +972,9 @@ class TaskParameters(DockerBaseClass):
 
             p_len = len(parts)
             if p_len == 1:
-                bind = ('0.0.0.0',)
+                bind = (default_ip,)
             elif p_len == 2:
-                bind = ('0.0.0.0', int(parts[0]))
+                bind = (default_ip, int(parts[0]))
             elif p_len == 3:
                 bind = (parts[0], int(parts[1])) if parts[1] else (parts[0],)
 
@@ -975,7 +1024,8 @@ class TaskParameters(DockerBaseClass):
                 protocol = 'tcp'
                 match = re.search(r'(/.+$)', port)
                 if match:
-                    protocol = match.group(1)
+                    protocol = match.group(1).replace('/', '')
+                    port = re.sub(r'/.+$', '', port)
                 exposed.append((port, protocol))
         if published_ports:
             # Any published port should also be exposed
@@ -1017,7 +1067,7 @@ class TaskParameters(DockerBaseClass):
 
     def _parse_ulimits(self):
         '''
-        Turn ulimits into a dictionary
+        Turn ulimits into an array of Ulimit objects
         '''
         if self.ulimits is None:
             return None
@@ -1029,6 +1079,7 @@ class TaskParameters(DockerBaseClass):
             if len(pieces) >= 2:
                 limits['name'] = pieces[0]
                 limits['soft'] = int(pieces[1])
+                limits['hard'] = int(pieces[1])
             if len(pieces) == 3:
                 limits['hard'] = int(pieces[2])
             try:
@@ -1124,7 +1175,7 @@ class Container(DockerBaseClass):
         Diff parameters vs existing container config. Returns tuple: (True | False, List of differences)
         '''
         self.log('Starting has_different_configuration')
-        self.parameters.expected_entrypoint = self._get_expected_entrypoint(image)
+        self.parameters.expected_entrypoint = self._get_expected_entrypoint()
         self.parameters.expected_links = self._get_expected_links()
         self.parameters.expected_ports = self._get_expected_ports()
         self.parameters.expected_exposed = self._get_expected_exposed(image)
@@ -1134,6 +1185,7 @@ class Container(DockerBaseClass):
         self.parameters.expected_etc_hosts = self._convert_simple_dict_to_list('etc_hosts')
         self.parameters.expected_env = self._get_expected_env(image)
         self.parameters.expected_cmd = self._get_expected_cmd()
+        self.parameters.expected_devices = self._get_expected_devices()
 
         if not self.container.get('HostConfig'):
             self.fail("has_config_diff: Error parsing container properties. HostConfig missing.")
@@ -1147,11 +1199,16 @@ class Container(DockerBaseClass):
         restart_policy = host_config.get('RestartPolicy', dict())
         config = self.container['Config']
         network = self.container['NetworkSettings']
-        host_config['Ulimits'] = self._get_expected_ulimits(host_config['Ulimits'])
 
         # The previous version of the docker module ignored the detach state by
         # assuming if the container was running, it must have been detached.
         detach = not (config.get('AttachStderr') and config.get('AttachStdout'))
+
+        # "ExposedPorts": null returns None type & causes AttributeError - PR #5517 
+        if config.get('ExposedPorts') is not None:
+            expected_exposed = [re.sub(r'/.+$', '', p) for p in config.get('ExposedPorts', dict()).keys()]
+        else:
+            expected_exposed = []
 
         # Map parameters to container inspect results
         config_mapping = dict(
@@ -1162,14 +1219,14 @@ class Container(DockerBaseClass):
             detach=detach,
             interactive=config.get('OpenStdin'),
             capabilities=host_config.get('CapAdd'),
-            devices=host_config.get('Devices'),
+            expected_devices=host_config.get('Devices'),
             dns_servers=host_config.get('Dns'),
             dns_opts=host_config.get('DnsOptions'),
             dns_search_domains=host_config.get('DnsSearch'),
             expected_env=(config.get('Env') or []),
             expected_entrypoint=config.get('Entrypoint'),
             expected_etc_hosts=host_config['ExtraHosts'],
-            expected_exposed=[re.sub(r'/.+$', '', p) for p in config.get('ExposedPorts', dict()).keys()],
+            expected_exposed=expected_exposed,
             groups=host_config.get('GroupAdd'),
             ipc_mode=host_config.get("IpcMode"),
             labels=config.get('Labels'),
@@ -1180,6 +1237,7 @@ class Container(DockerBaseClass):
             memory_swappiness=host_config.get('MemorySwappiness'),
             network_mode=host_config.get('NetworkMode'),
             oom_killer=host_config.get('OomKillDisable'),
+            oom_score_adj=host_config.get('OomScoreAdj'),
             pid_mode=host_config.get('PidMode'),
             privileged=host_config.get('Privileged'),
             expected_ports=host_config.get('PortBindings'),
@@ -1291,6 +1349,7 @@ class Container(DockerBaseClass):
             memory=host_config.get('Memory'),
             memory_reservation=host_config.get('MemoryReservation'),
             memory_swap=host_config.get('MemorySwap'),
+            oom_score_adj=host_config.get('OomScoreAdj'),
         )
 
         differences = []
@@ -1336,16 +1395,18 @@ class Container(DockerBaseClass):
                 if network.get('aliases') and not connected_networks[network['name']].get('Aliases'):
                     diff = True
                 if network.get('aliases') and connected_networks[network['name']].get('Aliases'):
-                    if set(network.get('aliases')) != set(connected_networks[network['name']].get('Aliases')):
-                        diff = True
+                    for alias in network.get('aliases'):
+                        if alias not in connected_networks[network['name']].get('Aliases', []):
+                            diff = True
                 if network.get('links') and not connected_networks[network['name']].get('Links'):
                     diff = True
                 if network.get('links') and connected_networks[network['name']].get('Links'):
                     expected_links = []
                     for link, alias in network['links'].iteritems():
                         expected_links.append("%s:%s" % (link, alias))
-                    if set(expected_links) != set(connected_networks[network['name']].get('Links', [])):
-                        diff = True
+                    for link in expected_links:
+                        if link not in connected_networks[network['name']].get('Links', []):
+                            diff = True
                 if diff:
                     different = True
                     differences.append(dict(
@@ -1383,20 +1444,45 @@ class Container(DockerBaseClass):
                     extra_networks.append(dict(name=network, id=network_config['NetworkID']))
         return extra, extra_networks
 
-    def _get_expected_entrypoint(self, image):
-        self.log('_get_expected_entrypoint')
-        if isinstance(self.parameters.entrypoint, list):
-            entrypoint = self.parameters.entrypoint
-        else:
-            entrypoint = []
-        if image and image['ContainerConfig'].get('Entrypoint'):
-            entrypoint = list(set(entrypoint + image['ContainerConfig'].get('Entrypoint')))
-        if len(entrypoint) == 0:
+    def _get_expected_devices(self):
+        if not self.parameters.devices:
             return None
-        return entrypoint
+        expected_devices = []
+        for device in self.parameters.devices:
+            parts = device.split(':')
+            if len(parts) == 1:
+                expected_devices.append(
+                    dict(
+                        CgroupPermissions='rwm',
+                        PathInContainer=parts[0],
+                        PathOnHost=parts[0]
+                    ))
+            elif len(parts) == 2:
+                parts = device.split(':')
+                expected_devices.append(
+                    dict(
+                        CgroupPermissions='rwm',
+                        PathInContainer=parts[1],
+                        PathOnHost=parts[0]
+                    )
+                )
+            else:
+                expected_devices.append(
+                    dict(
+                    CgroupPermissions=parts[2],
+                    PathInContainer=parts[1],
+                    PathOnHost=parts[0]
+                ))
+        return expected_devices
+
+    def _get_expected_entrypoint(self):
+        self.log('_get_expected_entrypoint')
+        if not self.parameters.entrypoint:
+            return None
+        return shlex.split(self.parameters.entrypoint)
 
     def _get_expected_ports(self):
-        if self.parameters.published_ports is None:
+        if not self.parameters.published_ports:
             return None
         expected_bound_ports = {}
         for container_port, config in self.parameters.published_ports.iteritems():
@@ -1406,8 +1492,8 @@ class Container(DockerBaseClass):
                 expected_bound_ports[container_port] = [{'HostIp': "0.0.0.0", 'HostPort': ""}]
             elif isinstance(config[0], tuple):
                 expected_bound_ports[container_port] = []
-                for host_ip, host_port in config.iteritems():
-                    expected_bound_ports[container_port].append({ 'HostIp': host_ip, 'HostPort': str(host_port)})
+                for host_ip, host_port in config:
+                    expected_bound_ports[container_port].append({'HostIp': host_ip, 'HostPort': str(host_port)})
             else:
                 expected_bound_ports[container_port] = [{'HostIp': config[0], 'HostPort': str(config[1])}]
         return expected_bound_ports
@@ -1530,20 +1616,13 @@ class Container(DockerBaseClass):
         self.log('_get_expected_ulimits')
         if config_ulimits is None:
             return None
-
         results = []
-        if isinstance(config_ulimits[0], Ulimit):
-            for limit in config_ulimits:
-                if limit.hard:
-                    results.append("%s:%s" % (limit.name, limit.soft, limit.hard))
-                else:
-                    results.append("%s:%s" % (limit.name, limit.soft))
-        else:
-            for limit in config_ulimits:
-                if limit.get('hard'):
-                    results.append("%s:%s" % (limit.get('name'), limit.get('hard')))
-                else:
-                    results.append("%s:%s" % (limit.get('name'), limit.get('soft')))
+        for limit in config_ulimits:
+            results.append(dict(
+                Name=limit.name,
+                Soft=limit.soft,
+                Hard=limit.hard
+            ))
         return results
 
     def _get_expected_cmd(self):
@@ -1583,13 +1662,10 @@ class ContainerManager(DockerBaseClass):
         elif state == 'absent':
             self.absent()
 
-        if not self.check_mode:
-            try:
-                del self.results['actions']
-            except:
-                pass
+        if not self.check_mode and not self.parameters.debug:
+            self.results.pop('actions')
 
-        if self.client.module._diff:
+        if self.client.module._diff or self.parameters.debug:
             self.results['diff'] = self.diff
 
         if self.facts:
@@ -1608,7 +1684,9 @@ class ContainerManager(DockerBaseClass):
         else:
             # Existing container
             different, differences = container.has_different_configuration(image)
-            image_different = self._image_is_different(image, container)
+            image_different = False
+            if not self.parameters.ignore_image:
+                image_different = self._image_is_different(image, container)
             if image_different or different or self.parameters.recreate:
                 self.diff['differences'] = differences
                 if image_different:
@@ -1695,7 +1773,7 @@ class ContainerManager(DockerBaseClass):
             if self.diff.get('differences'):
                 self.diff['differences'].append(dict(network_differences=network_differences))
             else:
-                self.diff['differences'] = dict(network_differences=network_differences)
+                self.diff['differences'] = [dict(network_differences=network_differences)]
             self.results['changed'] = True
             updated_container = self._add_networks(container, network_differences)
 
@@ -1705,7 +1783,7 @@ class ContainerManager(DockerBaseClass):
                 if self.diff.get('differences'):
                     self.diff['differences'].append(dict(purge_networks=extra_networks))
                 else:
-                    self.diff['differences'] = dict(purge_networks=extra_networks)
+                    self.diff['differences'] = [dict(purge_networks=extra_networks)]
                 self.results['changed'] = True
                 updated_container = self._purge_networks(container, extra_networks)
         return updated_container
@@ -1731,7 +1809,7 @@ class ContainerManager(DockerBaseClass):
             self.results['actions'].append(dict(added_to_network=diff['parameter']['name'], network_parameters=params))
             if not self.check_mode:
                 try:
-                    self.log("Connecting conainer to network %s" % diff['parameter']['id'])
+                    self.log("Connecting container to network %s" % diff['parameter']['id'])
                     self.log(params, pretty_print=True)
                     self.client.connect_container_to_network(container.Id, diff['parameter']['id'], **params)
                 except Exception as exc:
@@ -1743,7 +1821,7 @@ class ContainerManager(DockerBaseClass):
             self.results['actions'].append(dict(removed_from_network=network['name']))
             if not self.check_mode:
                 try:
-                    self.client.disconnect_container_from_network(container.Id, network['id'])
+                    self.client.disconnect_container_from_network(container.Id, network['name'])
                 except Exception as exc:
                     self.fail("Error disconnecting container from network %s - %s" % (network['name'],
                                                                                       str(exc)))
@@ -1776,10 +1854,17 @@ class ContainerManager(DockerBaseClass):
 
             if not self.parameters.detach:
                 status = self.client.wait(container_id)
+                output = self.client.logs(container_id, stdout=True, stderr=True, stream=False, timestamps=False)
                 if status != 0:
-                    output = self.client.logs(container_id, stdout=True, stderr=True, stream=False, timestamps=False)
                     self.fail(output, status=status)
-
+                if self.parameters.cleanup:
+                    self.container_remove(container_id, force=True)
+                insp = self._get_container(container_id)
+                if insp.raw:
+                    insp.raw['Output'] = output
+                else:
+                    insp.raw = dict(Output=output)
+                return insp
         return self._get_container(container_id)
 
     def container_remove(self, container_id, link=False, force=False):
@@ -1844,6 +1929,7 @@ def main():
     argument_spec = dict(
         blkio_weight=dict(type='int'),
         capabilities=dict(type='list'),
+        cleanup=dict(type='bool', default=False),
         command=dict(type='str'),
         cpu_period=dict(type='int'),
         cpu_quota=dict(type='int'),
@@ -1857,12 +1943,13 @@ def main():
         dns_search_domains=dict(type='list'),
         env=dict(type='dict'),
         env_file=dict(type='path'),
-        entrypoint=dict(type='list'),
+        entrypoint=dict(type='str'),
         etc_hosts=dict(type='dict'),
         exposed_ports=dict(type='list', aliases=['exposed', 'expose']),
         force_kill=dict(type='bool', default=False, aliases=['forcekill']),
         groups=dict(type='list'),
         hostname=dict(type='str'),
+        ignore_image=dict(type='bool', default=False),
         image=dict(type='str'),
         interactive=dict(type='bool', default=False),
         ipc_mode=dict(type='str'),
@@ -1871,7 +1958,7 @@ def main():
         kill_signal=dict(type='str'),
         labels=dict(type='dict'),
         links=dict(type='list'),
-        log_driver=dict(type='str', choices=['json-file', 'syslog', 'journald', 'gelf', 'fluentd', 'awslogs', 'splunk'], default='json-file'),
+        log_driver=dict(type='str', choices=['json-file', 'syslog', 'journald', 'gelf', 'fluentd', 'awslogs', 'splunk'], default=None),
         log_options=dict(type='dict', aliases=['log_opt']),
         mac_address=dict(type='str'),
         memory=dict(type='str', default='0'),
@@ -1882,17 +1969,18 @@ def main():
         network_mode=dict(type='str'),
         networks=dict(type='list'),
         oom_killer=dict(type='bool'),
+        oom_score_adj=dict(type='int'),
         paused=dict(type='bool', default=False),
         pid_mode=dict(type='str'),
         privileged=dict(type='bool', default=False),
         published_ports=dict(type='list', aliases=['ports']),
         pull=dict(type='bool', default=False),
-        purge_networks=dict(type='bool', deault=False),
+        purge_networks=dict(type='bool', default=False),
         read_only=dict(type='bool', default=False),
         recreate=dict(type='bool', default=False),
         restart=dict(type='bool', default=False),
         restart_policy=dict(type='str', choices=['no', 'on-failure', 'always', 'unless-stopped']),
-        restart_retries=dict(type='int', default=0),
+        restart_retries=dict(type='int', default=None),
         shm_size=dict(type='str'),
         security_opts=dict(type='list'),
         state=dict(type='str', choices=['absent', 'present', 'started', 'stopped'], default='started'),

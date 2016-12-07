@@ -19,6 +19,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: azure_rm_virtualmachine
@@ -158,7 +162,7 @@ options:
         required: false
     public_ip_allocation_method:
         description:
-            - If a public IP address is created when creating the VM (beacuse a Network Interface was not provided),
+            - If a public IP address is created when creating the VM (because a Network Interface was not provided),
               determines if the public IP address remains permanently associated with the Network Interface. If set
               to 'Dynamic' the public IP address may change any time the VM is rebooted or power cycled.
         choices:
@@ -241,8 +245,8 @@ EXAMPLES = '''
     storage_account: testaccount001
     admin_username: adminUser
     ssh_public_keys:
-      path: /home/adminUser/.ssh/authorized_keys
-      key_data: < insert yor ssh public key here... >
+      - path: /home/adminUser/.ssh/authorized_keys
+        key_data: < insert yor ssh public key here... >
     network_interfaces: testvm001
     image:
       offer: CentOS
@@ -288,12 +292,27 @@ powerstate:
     description: Indicates if the state is running, stopped, deallocated
     returned: always
     type: string
-    sample: running
-azure_rm_vm:
+    example: running
+deleted_vhd_uris:
+    description: List of deleted Virtual Hard Disk URIs.
+    returned: 'on delete'
+    type: list
+    example: ["https://testvm104519.blob.core.windows.net/vhds/testvm10.vhd"]
+deleted_network_interfaces:
+    description: List of deleted NICs.
+    returned: 'on delete'
+    type: list
+    example: ["testvm1001"]
+deleted_public_ips:
+    description: List of deleted public IP address names.
+    returned: 'on delete'
+    type: list
+    example: ["testvm1001"]
+azure_vm:
     description: Facts about the current state of the object. Note that facts are not part of the registered output but available directly.
     returned: always
-    type: dict
-    sample: {
+    type: complex
+    example: {
         "properties": {
             "hardwareProfile": {
                 "vmSize": "Standard_D1"
@@ -426,18 +445,24 @@ from ansible.module_utils.azure_rm_common import *
 
 try:
     from msrestazure.azure_exceptions import CloudError
-    from azure.mgmt.compute.models import NetworkInterfaceReference, VirtualMachine, HardwareProfile, \
-        StorageProfile, OSProfile, OSDisk, VirtualHardDisk, ImageReference, NetworkProfile, LinuxConfiguration, \
-        SshConfiguration, SshPublicKey
+    from azure.mgmt.compute.models import NetworkInterfaceReference, \
+                                          VirtualMachine, HardwareProfile, \
+                                          StorageProfile, OSProfile, OSDisk, \
+                                          VirtualHardDisk, ImageReference,\
+                                          NetworkProfile, LinuxConfiguration, \
+                                          SshConfiguration, SshPublicKey
     from azure.mgmt.network.models import PublicIPAddress, NetworkSecurityGroup, NetworkInterface, \
-        NetworkInterfaceIPConfiguration, Subnet
-    from azure.mgmt.storage.models import StorageAccountCreateParameters
-    from azure.mgmt.compute.models.compute_management_client_enums import DiskCreateOptionTypes, VirtualMachineSizeTypes
+                                          NetworkInterfaceIPConfiguration, Subnet
+    from azure.mgmt.storage.models import StorageAccountCreateParameters, Sku
+    from azure.mgmt.storage.models.storage_management_client_enums import Kind, SkuTier, SkuName
+    from azure.mgmt.compute.models.compute_management_client_enums import VirtualMachineSizeTypes, DiskCreateOptionTypes
 except ImportError:
     # This is handled in azure_rm_common
     pass
 
 AZURE_OBJECT_CLASS = 'VirtualMachine'
+
+AZURE_ENUM_MODULES = ['azure.mgmt.compute.models.compute_management_client_enums']
 
 
 def extract_names_from_blob_uri(blob_uri):
@@ -520,19 +545,19 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
             changed=False,
             actions=[],
             powerstate_change=None,
-            ansible_facts=dict(azure_rm_vm=None)
+            ansible_facts=dict(azure_vm=None)
         )
 
         super(AzureRMVirtualMachine, self).__init__(derived_arg_spec=self.module_arg_spec,
                                                     supports_check_mode=True)
 
-        # make sure options are lower case
-        self.remove_on_absent = set([resource.lower() for resource in  self.remove_on_absent])
-
     def exec_module(self, **kwargs):
 
         for key in self.module_arg_spec.keys() + ['tags']:
             setattr(self, key, kwargs[key])
+
+        # make sure options are lower case
+        self.remove_on_absent = set([resource.lower() for resource in self.remove_on_absent])
 
         changed = False
         powerstate_change = None
@@ -552,7 +577,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
             # Verify parameters and resolve any defaults
 
             if self.vm_size and not self.vm_size_is_valid():
-                self.fail("Parameter error: vm_size {0} is not valid for your subscription and location.".foramt(
+                self.fail("Parameter error: vm_size {0} is not valid for your subscription and location.".format(
                     self.vm_size
                 ))
 
@@ -666,7 +691,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
                 changed = True
 
         self.results['changed'] = changed
-        self.results['ansible_facts']['azure_rm_vm'] = results
+        self.results['ansible_facts']['azure_vm'] = results
         self.results['powerstate_change'] = powerstate_change
 
         if self.check_mode:
@@ -712,8 +737,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
                     nics = [NetworkInterfaceReference(id=id) for id in network_interfaces]
                     vhd = VirtualHardDisk(uri=requested_vhd_uri)
                     vm_resource = VirtualMachine(
-                        location=self.location,
-                        name=self.name,
+                        self.location,
                         tags=self.tags,
                         os_profile=OSProfile(
                             admin_username=self.admin_username,
@@ -755,7 +779,6 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
                         vm_resource.os_profile.linux_configuration.ssh = ssh_config
 
                     self.log("Create virtual machine with parameters:")
-                    self.log(self.serialize_obj(vm_resource, 'VirtualMachine'), pretty_print=True)
                     self.create_or_update_vm(vm_resource)
 
                 elif self.differences and len(self.differences) > 0:
@@ -768,10 +791,8 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
                             for interface in vm_dict['properties']['networkProfile']['networkInterfaces']]
                     vhd = VirtualHardDisk(uri=vm_dict['properties']['storageProfile']['osDisk']['vhd']['uri'])
                     vm_resource = VirtualMachine(
-                        id=vm_dict['id'],
-                        location=vm_dict['location'],
-                        name=vm_dict['name'],
-                        type=vm_dict['type'],
+                        vm_dict['location'],
+                        vm_id=vm_dict['properties']['vmId'],
                         os_profile=OSProfile(
                             admin_username=vm_dict['properties']['osProfile']['adminUsername'],
                             computer_name=vm_dict['properties']['osProfile']['computerName']
@@ -819,21 +840,19 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
                                 vm_resource.os_profile.linux_configuration.ssh = SshConfiguration(public_keys=[])
                                 for key in public_keys:
                                     vm_resource.os_profile.linux_configuration.ssh.public_keys.append(
-                                        SshConfiguration(
-                                            path=key['path'],
-                                            key_data=key['keyData']
-                                        )
+                                        SshPublicKey(path=key['path'], key_data=key['keyData'])
                                     )
                     self.log("Update virtual machine with parameters:")
-                    self.log(self.serialize_obj(vm_resource, 'VirtualMachine'), pretty_print=True)
                     self.create_or_update_vm(vm_resource)
 
                 # Make sure we leave the machine in requested power state
-                if powerstate_change == 'poweron' and self.results['state']['powerstate'] != 'running':
+                if powerstate_change == 'poweron' and \
+                    self.results['ansible_facts']['azure_vm']['powerstate'] != 'running':
                     # Attempt to power on the machine
                     self.power_on_vm()
 
-                elif powerstate_change == 'poweroff' and self.results['state']['powerstate'] == 'running':
+                elif powerstate_change == 'poweroff' and \
+                    self.results['ansible_facts']['azure_vm']['powerstate'] == 'running':
                     # Attempt to power off the machine
                     self.power_off_vm()
 
@@ -843,12 +862,12 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
                 elif powerstate_change == 'deallocated':
                     self.deallocate_vm()
 
-                self.results['ansible_facts']['azure_rm_vm'] = self.serialize_vm(self.get_vm())
+                self.results['ansible_facts']['azure_vm'] = self.serialize_vm(self.get_vm())
 
             elif self.state == 'absent':
                 # delete the VM
                 self.log("Delete virtual machine {0}".format(self.name))
-                self.results['ansible_facts']['azure_rm_vm'] = None 
+                self.results['ansible_facts']['azure_vm'] = None
                 self.delete_vm(vm)
 
         # until we sort out how we want to do this globally
@@ -875,9 +894,18 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
         :param vm: VirtualMachine object
         :return: dict
         '''
-        result = self.serialize_obj(vm, AZURE_OBJECT_CLASS)
-        result['powerstate'] = next((s.code.replace('PowerState/', '')
-                                     for s in vm.instance_view.statuses if s.code.startswith('PowerState')), None)
+
+        result = self.serialize_obj(vm, AZURE_OBJECT_CLASS, enum_modules=AZURE_ENUM_MODULES)
+        result['id'] = vm.id
+        result['name'] = vm.name
+        result['type'] = vm.type
+        result['location'] = vm.location
+        result['tags'] = vm.tags
+
+        result['powerstate'] = dict()
+        if vm.instance_view:
+            result['powerstate'] = next((s.code.replace('PowerState/', '')
+                                         for s in vm.instance_view.statuses if s.code.startswith('PowerState')), None)
 
         # Expand network interfaces to include config properties
         for interface in vm.network_profile.network_interfaces:
@@ -889,7 +917,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
                     interface_dict['name'] = int_dict['networkInterfaces']
                     interface_dict['properties'] = nic_dict['properties']
 
-        # Expand public IPs to include config porperties
+        # Expand public IPs to include config properties
         for interface in  result['properties']['networkProfile']['networkInterfaces']:
             for config in interface['properties']['ipConfigurations']:
                 if config['properties'].get('publicIPAddress'):
@@ -1118,9 +1146,10 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
         valid_name = False
 
         # Attempt to find a valid storage account name
+        storage_account_name_base = self.name[:20].lower()
         for i in range(0, 5):
             rand = random.randrange(1000, 9999)
-            storage_account_name = self.name[:20] + str(rand)
+            storage_account_name = storage_account_name_base + str(rand)
             if self.check_storage_account_name(storage_account_name):
                 valid_name = True
                 break
@@ -1138,8 +1167,10 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
             self.log("Storage account {0} found.".format(storage_account_name))
             self.check_provisioning_state(account)
             return account
-
-        parameters = StorageAccountCreateParameters(account_type='Standard_LRS', location=self.location)
+        sku = Sku(SkuName.standard_lrs)
+        Sku.tier = SkuTier.standard
+        kind = Kind.storage
+        parameters = StorageAccountCreateParameters(sku, kind, self.location)
         self.log("Creating storage account {0} in location {1}".format(storage_account_name, self.location))
         self.results['actions'].append("Created storage account {0}".format(storage_account_name))
         try:
@@ -1243,21 +1274,18 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
 
         parameters = NetworkInterface(
             location=self.location,
-            name=network_interface_name,
             ip_configurations=[
                 NetworkInterfaceIPConfiguration(
-                    name='default',
                     private_ip_allocation_method='Dynamic',
                 )
             ]
         )
         parameters.ip_configurations[0].subnet = Subnet(id=subnet_id)
+        parameters.ip_configurations[0].name = 'default'
         parameters.network_security_group = NetworkSecurityGroup(id=group.id,
-                                                                 name=group.name,
                                                                  location=group.location,
                                                                  resource_guid=group.resource_guid)
         parameters.ip_configurations[0].public_ip_address = PublicIPAddress(id=pip.id,
-                                                                            name=pip.name,
                                                                             location=pip.location,
                                                                             resource_guid=pip.resource_guid)
 

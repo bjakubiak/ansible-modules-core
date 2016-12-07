@@ -15,6 +15,10 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: digital_ocean
@@ -86,6 +90,13 @@ options:
     version_added: "2.0"
     required: false
     default: None
+  ipv6:
+    description:
+      - Optional, Boolean, enable IPv6 for your droplet.
+    version_added: "2.2"
+    required: false
+    default: "no"
+    choices: [ "yes", "no" ]
   wait:
     description:
      - Wait for the droplet to be in state 'running' before returning.  If wait is "no" an ip_address may not be returned.
@@ -102,7 +113,7 @@ options:
 notes:
   - Two environment variables can be used, DO_API_KEY and DO_API_TOKEN. They both refer to the v2 token.
   - As of Ansible 1.9.5 and 2.0, Version 2 of the DigitalOcean API is used, this removes C(client_id) and C(api_key) options in favor of C(api_token).
-  - If you are running Ansible 1.9.4 or earlier you might not be able to use the included version of this module as the API version used has been retired. 
+  - If you are running Ansible 1.9.4 or earlier you might not be able to use the included version of this module as the API version used has been retired.
     Upgrade Ansible or, if unable to, try downloading the latest version of this module from github and putting it into a 'library' directory.
 requirements:
   - "python >= 2.6"
@@ -134,11 +145,13 @@ EXAMPLES = '''
     region_id: ams2
     image_id: fedora-19-x64
     wait_timeout: 500
-
   register: my_droplet
 
-- debug: msg="ID is {{ my_droplet.droplet.id }}"
-- debug: msg="IP is {{ my_droplet.droplet.ip_address }}"
+- debug:
+    msg: "ID is {{ my_droplet.droplet.id }}"
+
+- debug:
+    msg: "IP is {{ my_droplet.droplet.ip_address }}"
 
 # Ensure a droplet is present
 # If droplet id already exist, will return the droplet details and changed = False
@@ -173,25 +186,38 @@ EXAMPLES = '''
 
 import os
 import time
+import traceback
+
 from distutils.version import LooseVersion
 
-HAS_DOPY = True
+try:
+    import six
+    HAS_SIX = True
+except ImportError:
+    HAS_SIX = False
+
+HAS_DOPY = False
 try:
     import dopy
     from dopy.manager import DoError, DoManager
-    if LooseVersion(dopy.__version__) < LooseVersion('0.3.2'):
-        HAS_DOPY = False
+    if LooseVersion(dopy.__version__) >= LooseVersion('0.3.2'):
+        HAS_DOPY = True
 except ImportError:
-    HAS_DOPY = False
+    pass
 
-class TimeoutError(DoError):
-    def __init__(self, msg, id):
+from ansible.module_utils.basic import AnsibleModule
+
+
+class TimeoutError(Exception):
+    def __init__(self, msg, id_):
         super(TimeoutError, self).__init__(msg)
-        self.id = id
+        self.id = id_
+
 
 class JsonfyMixIn(object):
     def to_json(self):
         return self.__dict__
+
 
 class Droplet(JsonfyMixIn):
     manager = None
@@ -242,10 +268,13 @@ class Droplet(JsonfyMixIn):
         cls.manager = DoManager(None, api_token, api_version=2)
 
     @classmethod
-    def add(cls, name, size_id, image_id, region_id, ssh_key_ids=None, virtio=True, private_networking=False, backups_enabled=False, user_data=None):
+    def add(cls, name, size_id, image_id, region_id, ssh_key_ids=None, virtio=True, private_networking=False, backups_enabled=False, user_data=None, ipv6=False):
         private_networking_lower = str(private_networking).lower()
         backups_enabled_lower = str(backups_enabled).lower()
-        json = cls.manager.new_droplet(name, size_id, image_id, region_id, ssh_key_ids, virtio, private_networking_lower, backups_enabled_lower,user_data)
+        ipv6_lower = str(ipv6).lower()
+        json = cls.manager.new_droplet(name, size_id, image_id, region_id,
+            ssh_key_ids=ssh_key_ids, virtio=virtio, private_networking=private_networking_lower,
+            backups_enabled=backups_enabled_lower, user_data=user_data, ipv6=ipv6_lower)
         droplet = cls(json)
         return droplet
 
@@ -272,6 +301,7 @@ class Droplet(JsonfyMixIn):
     def list_all(cls):
         json = cls.manager.all_active_droplets()
         return map(cls, json)
+
 
 class SSH(JsonfyMixIn):
     manager = None
@@ -307,6 +337,7 @@ class SSH(JsonfyMixIn):
     def add(cls, name, key_pub):
         json = cls.manager.new_ssh_key(name, key_pub)
         return cls(json)
+
 
 def core(module):
     def getkeyordie(k):
@@ -349,6 +380,7 @@ def core(module):
                     private_networking=module.params['private_networking'],
                     backups_enabled=module.params['backups_enabled'],
                     user_data=module.params.get('user_data'),
+                    ipv6=module.params['ipv6'],
                 )
 
             if droplet.is_powered_on():
@@ -374,7 +406,7 @@ def core(module):
             if not droplet:
                 module.exit_json(changed=False, msg='The droplet is not found.')
 
-            event_json = droplet.destroy()
+            droplet.destroy()
             module.exit_json(changed=True)
 
     elif command == 'ssh':
@@ -412,6 +444,7 @@ def main():
             id = dict(aliases=['droplet_id'], type='int'),
             unique_name = dict(type='bool', default='no'),
             user_data = dict(default=None),
+            ipv6 = dict(type='bool', default='no'),
             wait = dict(type='bool', default=True),
             wait_timeout = dict(default=300, type='int'),
             ssh_pub_key = dict(type='str'),
@@ -428,6 +461,8 @@ def main():
             ['id', 'name'],
         ),
     )
+    if not HAS_DOPY and not HAS_SIX:
+        module.fail_json(msg='dopy >= 0.3.2 is required for this module.  dopy requires six but six is not installed.  Make sure both dopy and six are installed.')
     if not HAS_DOPY:
         module.fail_json(msg='dopy >= 0.3.2 required for this module')
 
@@ -436,10 +471,7 @@ def main():
     except TimeoutError as e:
         module.fail_json(msg=str(e), id=e.id)
     except (DoError, Exception) as e:
-        module.fail_json(msg=str(e))
-
-# import module snippets
-from ansible.module_utils.basic import *
+        module.fail_json(msg=str(e), exception=traceback.format_exc())
 
 if __name__ == '__main__':
     main()

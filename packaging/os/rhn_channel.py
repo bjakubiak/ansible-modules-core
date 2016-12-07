@@ -17,6 +17,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: rhn_channel
@@ -26,7 +30,7 @@ description:
 version_added: "1.1"
 author: "Vincent Van der Kussen (@vincentvdk)"
 notes:
-    - this module fetches the system id from RHN. 
+    - this module fetches the system id from RHN.
 requirements:
     - none
 options:
@@ -46,7 +50,7 @@ options:
         required: false
         default: present
     url:
-        description: 
+        description:
             - The full url to the RHN/Satellite api
         required: true
     user:
@@ -60,7 +64,12 @@ options:
 '''
 
 EXAMPLES = '''
-- rhn_channel: name=rhel-x86_64-server-v2vwin-6 sysname=server01 url=https://rhn.redhat.com/rpc/api user=rhnuser password=guessme
+- rhn_channel:
+    name: rhel-x86_64-server-v2vwin-6
+    sysname: server01
+    url: https://rhn.redhat.com/rpc/api
+    user: rhnuser
+    password: guessme
 '''
 
 import xmlrpclib
@@ -166,5 +175,6 @@ def main():
 
 # import module snippets
 from ansible.module_utils.basic import *
-main()
 
+if __name__ == '__main__':
+    main()

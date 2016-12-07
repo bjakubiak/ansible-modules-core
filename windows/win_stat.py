@@ -17,6 +17,10 @@
 # this is a windows documentation stub, actual code lives in the .ps1
 # file of the same name
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: win_stat
@@ -50,11 +54,12 @@ author: "Chris Church (@cchurch)"
 '''
 
 EXAMPLES = '''
-# Obtain information about a file
-
-- win_stat: path=C:\\foo.ini
+- name: Obtain information about a file
+  win_stat:
+    path: C:\foo.ini
   register: file_info
 
-- debug: var=file_info
+- debug:
+    var: file_info
 '''
 

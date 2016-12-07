@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = """
 ---
 module: ec2_lc
@@ -53,7 +57,7 @@ options:
     required: false
   security_groups:
     description:
-      - A list of security groups into which instances should be found
+      - A list of security groups to apply to the instances. For VPC instances, specify security group IDs. For EC2-Classic, specify either security group names or IDs.
     required: false
   volumes:
     description:
@@ -308,4 +312,5 @@ def main():
     elif state == 'absent':
         delete_launch_config(connection, module)
 
-main()
+if __name__ == '__main__':
+    main()

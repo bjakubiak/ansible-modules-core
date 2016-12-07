@@ -17,6 +17,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 
 module: docker_service
@@ -72,7 +76,7 @@ options:
       required: false
   scale:
       description:
-        - When C(sate) is I(present) scale services. Provide a dictionary of key/value pairs where the key
+        - When C(state) is I(present) scale services. Provide a dictionary of key/value pairs where the key
           is the name of the service and the value is an integer count for the number of containers.
       type: complex
       required: false
@@ -85,7 +89,7 @@ options:
   definition:
       description:
         - Provide docker-compose yaml describing one or more services, networks and volumes.
-        - Mutually exclusive with C(project_src) and C(project_files).
+        - Mutually exclusive with C(project_src) and C(files).
       type: complex
       required: false
   hostname_check:
@@ -108,13 +112,30 @@ options:
       default: smart
   build:
       description:
-        - Whether or not to build images before starting containers.
-        - Missing images will always be built.
-        - If an image is present and C(build) is false, the image will not be built.
-        - If an image is present and C(build) is true, the image will be built.
+        - Use with state I(present) to always build images prior to starting the application.
+        - Same as running docker-compose build with the pull option.
+        - Images will only be rebuilt if Docker detects a change in the Dockerfile or build directory contents.
+        - Use the C(nocache) option to ignore the image cache when performing the build.
+        - If an existing image is replaced, services using the image will be recreated unless C(recreate) is I(never).
       type: bool
       required: false
-      default: true
+      default: false
+  pull:
+      description:
+        - Use with state I(present) to always pull images prior to starting the application.
+        - Same as running docker-compose pull.
+        - When a new image is pulled, services using the image will be recreated unless C(recreate) is I(never).
+      type: bool
+      required: false
+      default: false
+      version_added: "2.2"
+  nocache:
+      description:
+        - Use with the build option to ignore the cache during the image build process.
+      type: bool
+      required: false
+      default: false
+      version_added: "2.2"
   remove_images:
       description:
         - Use with state I(absent) to remove the all images or only local images.
@@ -173,14 +194,16 @@ EXAMPLES = '''
         project_src: flask
       register: output
 
-    - debug: var=output
+    - debug:
+        var: output
 
     - docker_service:
         project_src: flask
         build: no
       register: output
 
-    - debug: var=output
+    - debug:
+        var: output
 
     - assert:
         that: "not output.changed "
@@ -191,7 +214,8 @@ EXAMPLES = '''
         stopped: true
       register: output
 
-    - debug: var=output
+    - debug:
+        var: output
 
     - assert:
         that:
@@ -204,7 +228,8 @@ EXAMPLES = '''
         restarted: true
       register: output
 
-    - debug: var=output
+    - debug:
+        var: output
 
     - assert:
         that:
@@ -222,7 +247,8 @@ EXAMPLES = '''
           web: 2
       register: output
 
-    - debug: var=output
+    - debug:
+        var: output
 
 - name: Run with inline v2 compose
   hosts: localhost
@@ -251,7 +277,8 @@ EXAMPLES = '''
                 - db
       register: output
 
-    - debug: var=output
+    - debug:
+        var: output
 
     - assert:
         that:
@@ -283,7 +310,8 @@ EXAMPLES = '''
                 - db
       register: output
 
-    - debug: var=output
+    - debug:
+        var: output
 
     - assert:
         that:
@@ -383,9 +411,35 @@ actions:
           returned: always
           type: complex
           contains:
+              pulled_image:
+                  description: Provides image details when a new image is pulled for the service.
+                  returned: on image pull
+                  type: complex
+                  contains:
+                      name:
+                          description: name of the image
+                          returned: always
+                          type: string
+                      id:
+                          description: image hash
+                          returned: always
+                          type: string
+              built_image:
+                  description: Provides image details when a new image is built for the service.
+                  returned: on image build
+                  type: complex
+                  contains:
+                      name:
+                          description: name of the image
+                          returned: always
+                          type: string
+                      id:
+                          description: image hash
+                          returned: always
+                          type: string
+
               action:
-                  description: A descriptive name of the action to be performed on the set of containers
-                               within the service.
+                  description: A descriptive name of the action to be performed on the service's containers.
                   returned: always
                   type: list
                   contains:
@@ -409,6 +463,9 @@ HAS_COMPOSE = True
 HAS_COMPOSE_EXC = None
 MINIMUM_COMPOSE_VERSION = '1.7.0'
 
+import sys
+import re
+
 try:
     import yaml
 except ImportError as exc:
@@ -420,14 +477,18 @@ from ansible.module_utils.basic import *
 
 try:
     from compose import __version__ as compose_version
+    from compose.project import ProjectError
     from compose.cli.command import project_from_options
-    from compose.service import ConvergenceStrategy
+    from compose.service import ConvergenceStrategy, NoSuchImageError
     from compose.cli.main import convergence_strategy_from_opts, build_action_from_opts, image_type_from_opt
+    from compose.const import DEFAULT_TIMEOUT
 except ImportError as exc:
     HAS_COMPOSE = False
     HAS_COMPOSE_EXC = str(exc)
+    DEFAULT_TIMEOUT = 10
 
 from ansible.module_utils.docker_common import *
+from contextlib import contextmanager
 
 
 AUTH_PARAM_MAPPING = {
@@ -439,6 +500,31 @@ AUTH_PARAM_MAPPING = {
     u'tls_verify': u'--tlsverify'
 }
 
+
+@contextmanager
+def stdout_redirector(path_name):
+    old_stdout = sys.stdout  
+    fd = open(path_name, 'w')
+    sys.stdout = fd
+    try:
+        yield
+    finally:
+        sys.stdout = old_stdout    
+
+def get_stdout(path_name):
+    full_stdout = ''
+    last_line = '' 
+    with open(path_name, 'r') as fd:
+        for line in fd:
+            # strip terminal format/color chars
+            new_line = re.sub(r'\x1b\[.+m', '', line.encode('ascii'))
+            full_stdout += new_line
+            if new_line.strip():
+               # Assuming last line contains the error message 
+               last_line = new_line.strip().encode('utf-8')
+    fd.close()
+    os.remove(path_name)
+    return full_stdout, last_line
 
 class ContainerManager(DockerBaseClass):
 
@@ -465,6 +551,8 @@ class ContainerManager(DockerBaseClass):
         self.services = None
         self.scale = None
         self.debug = None
+        self.pull = None
+        self.nocache = None
 
         for key, value in client.module.params.items():
             setattr(self, key, value)
@@ -484,13 +572,13 @@ class ContainerManager(DockerBaseClass):
         if self.files:
             self.options[u'--file'] = self.files
 
+        if not HAS_COMPOSE:
+            self.client.fail("Unable to load docker-compose. Try `pip install docker-compose`. Error: %s" % HAS_COMPOSE_EXC)
+
         if LooseVersion(compose_version) < LooseVersion(MINIMUM_COMPOSE_VERSION):
             self.client.fail("Found docker-compose version %s. Minimum required version is %s. "
                              "Upgrade docker-compose to a min version of %s." %
                              (compose_version, MINIMUM_COMPOSE_VERSION, MINIMUM_COMPOSE_VERSION))
-
-        if not HAS_COMPOSE:
-            self.client.fail("Unable to load docker-compose. Try `pip install docker-compose`. Error: %s" % HAS_COMPOSE_EXC)
 
         self.log("options: ")
         self.log(self.options, pretty_print=True)
@@ -551,15 +639,15 @@ class ContainerManager(DockerBaseClass):
         return options
 
     def cmd_up(self):
-
+    
         start_deps = self.dependencies
         service_names = self.services
         detached = True
-        result = dict(changed=False, actions=dict(), ansible_facts=dict())
+        result = dict(changed=False, actions=[], ansible_facts=dict())
 
         up_options = {
             u'--no-recreate': False,
-            u'--build': self.build,
+            u'--build': True,
             u'--no-build': False,
             u'--no-deps': False,
             u'--force-recreate': False,
@@ -576,41 +664,66 @@ class ContainerManager(DockerBaseClass):
         converge = convergence_strategy_from_opts(up_options)
         self.log("convergence strategy: %s" % converge)
 
+        if self.pull:
+            pull_output = self.cmd_pull()
+            result['changed'] = pull_output['changed']  
+            result['actions'] += pull_output['actions']
+
+        if self.build:
+            build_output = self.cmd_build()
+            result['changed'] = build_output['changed']  
+            result['actions'] += build_output['actions']
+
         for service in self.project.services:
             if not service_names or service.name in service_names:
                 plan = service.convergence_plan(strategy=converge)
                 if plan.action != 'noop':
                     result['changed'] = True
-                if self.debug or self.check_mode:
-                    result['actions'][service.name] = dict()
-                    result['actions'][service.name][plan.action] = []
+                    result_action = dict(service=service.name) 
+                    result_action[plan.action] = []                      
                     for container in plan.containers:
-                        result['actions'][service.name][plan.action].append(dict(
+                        result_action[plan.action].append(dict(
                             id=container.id,
                             name=container.name,
                             short_id=container.short_id,
                         ))
+                    result['actions'].append(result_action)
 
         if not self.check_mode and result['changed']:
+            _, fd_name = tempfile.mkstemp(prefix="ansible")
             try:
-                self.project.up(
-                    service_names=service_names,
-                    start_deps=start_deps,
-                    strategy=converge,
-                    do_build=build_action_from_opts(up_options),
-                    detached=detached,
-                    remove_orphans=self.remove_orphans)
+                with stdout_redirector(fd_name):
+                    do_build = build_action_from_opts(up_options)
+                    self.log('Setting do_build to %s' % do_build)
+                    self.project.up(
+                        service_names=service_names,
+                        start_deps=start_deps,
+                        strategy=converge,
+                        do_build=do_build,
+                        detached=detached,
+                        remove_orphans=self.remove_orphans,
+                        timeout=self.timeout)
             except Exception as exc:
-                self.client.fail("Error bring %s up - %s" % (self.project.name, str(exc)))
+                full_stdout, last_line= get_stdout(fd_name)
+                self.client.module.fail_json(msg="Error starting project %s" % str(exc), module_stderr=last_line,
+                                             module_stdout=full_stdout)
+            else:
+                get_stdout(fd_name)
 
         if self.stopped:
-            result.update(self.cmd_stop(service_names))
+            stop_output = self.cmd_stop(service_names)
+            result['changed'] = stop_output['changed']  
+            result['actions'] += stop_output['actions']
 
         if self.restarted:
-            result.update(self.cmd_restart(service_names))
+            restart_output = self.cmd_restart(service_names)
+            result['changed'] = restart_output['changed']  
+            result['actions'] += restart_output['actions']
 
         if self.scale:
-            result.update(self.cmd_scale())
+            scale_output = self.cmd_scale()
+            result['changed'] = scale_output['changed']  
+            result['actions'] += scale_output['actions']
 
         for service in self.project.services:
             result['ansible_facts'][service.name] = dict()
@@ -669,101 +782,202 @@ class ContainerManager(DockerBaseClass):
 
         return result
 
+    def cmd_pull(self):
+        result = dict(
+            changed=False,
+            actions=[],
+        )
+
+        if not self.check_mode:
+            for service in self.project.get_services(self.services, include_deps=False):
+                if 'image' not in service.options:
+                    continue 
+
+                self.log('Pulling image for service %s' % service.name)
+                # store the existing image ID
+                old_image_id = ''
+                try:
+                    image = service.image()
+                    if image and image.get('Id'):
+                        old_image_id = image['Id']
+                except NoSuchImageError:
+                    pass
+                except Exception as exc:
+                    self.client.fail("Error: service image lookup failed - %s" % str(exc))
+
+                # pull the image
+                try:
+                    service.pull(ignore_pull_failures=False)
+                except Exception as exc:
+                    self.client.fail("Error: pull failed with %s" % str(exc)) 
+
+                # store the new image ID
+                new_image_id = '' 
+                try:
+                    image = service.image()
+                    if image and image.get('Id'):
+                        new_image_id = image['Id']
+                except NoSuchImageError as exc:
+                    self.client.fail("Error: service image lookup failed after pull - %s" % str(exc))    
+
+                if new_image_id != old_image_id:
+                    # if a new image was pulled
+                    result['changed'] = True
+                    result['actions'].append(dict(
+                        service=service.name,
+                        pulled_image=dict(
+                            name=service.image_name,
+                            id=new_image_id
+                        )
+                    ))
+        return result
+
+    def cmd_build(self):
+        result = dict(
+            changed=False,
+            actions=[]
+        )
+        if not self.check_mode:
+            for service in self.project.get_services(self.services, include_deps=False):
+                if service.can_be_built():
+                    self.log('Building image for service %s' % service.name)
+                    # store the existing image ID
+                    old_image_id = ''
+                    try:
+                        image = service.image()
+                        if image and image.get('Id'):
+                            old_image_id = image['Id']
+                    except NoSuchImageError:
+                        pass
+                    except Exception as exc:
+                        self.client.fail("Error: service image lookup failed - %s" % str(exc))
+
+                    # build the image
+                    try:
+                        new_image_id = service.build(pull=True, no_cache=self.nocache)
+                    except Exception as exc:
+                        self.client.fail("Error: build failed with %s" % str(exc)) 
+
+                    if new_image_id not in old_image_id:
+                        # if a new image was built
+                        result['changed'] = True
+                        result['actions'].append(dict(
+                            service=service.name, 
+                            built_image=dict(
+                                name=service.image_name,
+                                id=new_image_id
+                            )
+                        ))
+        return result
+
     def cmd_down(self):
         result = dict(
             changed=False,
-            actions=dict(),
+            actions=[]
         )
-
         for service in self.project.services:
             containers = service.containers(stopped=True)
             if len(containers):
                 result['changed'] = True
-            if self.debug or self.check_mode:
-                result['actions'][service.name] = dict()
-                result['actions'][service.name]['deleted'] = [container.name for container in containers]
-
+            result['actions'].append(dict(
+                service=service.name,
+                deleted=[container.name for container in containers]
+            ))
         if not self.check_mode and result['changed']:
             image_type = image_type_from_opt('--rmi', self.remove_images)
             try:
                 self.project.down(image_type, self.remove_volumes, self.remove_orphans)
             except Exception as exc:
-                self.client.fail("Error bringing %s down - %s" % (self.project.name, str(exc)))
-
+                self.client.fail("Error stopping project - %s" % str(exc))
         return result
 
     def cmd_stop(self, service_names):
         result = dict(
             changed=False,
-            actions=dict()
+            actions=[]
         )
         for service in self.project.services:
             if not service_names or service.name in service_names:
-                result['actions'][service.name] = dict()
-                result['actions'][service.name]['stop'] = []
+                service_res = dict(
+                    service=service.name,
+                    stop=[]
+                ) 
                 for container in service.containers(stopped=False):
                     result['changed'] = True
-                    if self.debug:
-                        result['actions'][service.name]['stop'].append(dict(
-                            id=container.id,
-                            name=container.name,
-                            short_id=container.short_id,
-                        ))
-
+                    service_res['stop'].append(dict(
+                        id=container.id,
+                        name=container.name,
+                        short_id=container.short_id
+                    ))
+                result['actions'].append(service_res)
         if not self.check_mode and result['changed']:
+            _, fd_name = tempfile.mkstemp(prefix="ansible")
             try:
-                self.project.stop(service_names=service_names)
+                with stdout_redirector(fd_name):
+                    self.project.stop(service_names=service_names, timeout=self.timeout)
             except Exception as exc:
-                self.client.fail("Error stopping services for %s - %s" % (self.project.name, str(exc)))
-
+                full_stdout, last_line = get_stdout(fd_name)
+                self.client.module.fail_json(msg="Error stopping project %s" % str(exc), module_stderr=last_line,
+                                             module_stdout=full_stdout)
+            else:
+                get_stdout(fd_name)
         return result
 
     def cmd_restart(self, service_names):
         result = dict(
             changed=False,
-            actions=dict()
+            actions=[]
         )
 
         for service in self.project.services:
             if not service_names or service.name in service_names:
-                result['actions'][service.name] = dict()
-                result['actions'][service.name]['restart'] = []
+                service_res = dict(
+                    service=service.name,
+                    restart=[]
+                )
                 for container in service.containers(stopped=True):
                     result['changed'] = True
-                    if self.debug or self.check_mode:
-                        result['actions'][service.name]['restart'].append(dict(
-                            id=container.id,
-                            name=container.name,
-                            short_id=container.short_id,
-                        ))
-
+                    service_res['restart'].append(dict(
+                        id=container.id,
+                        name=container.name,
+                        short_id=container.short_id
+                    ))
+                result['actions'].append(service_res)
+         
         if not self.check_mode and result['changed']:
+            _, fd_name = tempfile.mkstemp(prefix="ansible")
             try:
-                self.project.restart(service_names=service_names)
+                with stdout_redirector(fd_name):
+                    self.project.restart(service_names=service_names, timeout=self.timeout)
             except Exception as exc:
-                self.client.fail("Error restarting services for %s - %s" % (self.project.name, str(exc)))
-
+                full_stdout, last_line = get_stdout(fd_name)
+                self.client.module.fail_json(msg="Error restarting project %s" % str(exc), module_stderr=last_line,
+                                             module_stdout=full_stdout)
+            else:
+                get_stdout(fd_name)
         return result
 
     def cmd_scale(self):
         result = dict(
             changed=False,
-            actions=dict()
+            actions=[]
         )
-
         for service in self.project.services:
             if service.name in self.scale:
-                result['actions'][service.name] = dict()
+                service_res = dict(
+                    service=service.name,
+                    scale=0
+                )
                 containers = service.containers(stopped=True)
                 if len(containers) != self.scale[service.name]:
                     result['changed'] = True
-                    if self.debug or self.check_mode:
-                        result['actions'][service.name]['scale'] = self.scale[service.name] - len(containers)
+                    service_res['scale'] = self.scale[service.name] - len(containers)
                     if not self.check_mode:
                         try:
-                            service.scale(self.scale[service.name])
+                            service.scale(int(self.scale[service.name]))
                         except Exception as exc:
                             self.client.fail("Error scaling %s - %s" % (service.name, str(exc)))
+                    result['actions'].append(service_res) 
         return result
 
 
@@ -776,7 +990,7 @@ def main():
         definition=dict(type='dict'),
         hostname_check=dict(type='bool', default=False),
         recreate=dict(type='str', choices=['always','never','smart'], default='smart'),
-        build=dict(type='bool', default=True),
+        build=dict(type='bool', default=False),
         remove_images=dict(type='str', choices=['all', 'local']),
         remove_volumes=dict(type='bool', default=False),
         remove_orphans=dict(type='bool', default=False),
@@ -785,7 +999,10 @@ def main():
         scale=dict(type='dict'),
         services=dict(type='list'),
         dependencies=dict(type='bool', default=True),
-        debug=dict(type='bool', default=False)
+        pull=dict(type='bool', default=False),
+        nocache=dict(type='bool', default=False),
+        debug=dict(type='bool', default=False),
+        timeout=dict(type='int', default=DEFAULT_TIMEOUT)
     )
 
     mutually_exclusive = [

@@ -19,6 +19,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: azure_rm_resourcegroup
@@ -167,6 +171,8 @@ class AzureRMResourceGroup(AzureRMModuleBase):
                 changed = True
             elif self.state == 'present':
                 update_tags, results['tags'] = self.update_tags(results['tags'])
+                self.log("update tags %s" % update_tags)
+                self.log("new tags: %s" % str(results['tags']))
                 if update_tags:
                     changed = True
 

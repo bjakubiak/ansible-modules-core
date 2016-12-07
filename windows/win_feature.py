@@ -21,13 +21,17 @@
 # this is a windows documentation stub.  actual code lives in the .ps1
 # file of the same name
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: win_feature
 version_added: "1.7"
-short_description: Installs and uninstalls Windows Features
+short_description: Installs and uninstalls Windows Features on Windows Server
 description:
-     - Installs or uninstalls Windows Roles or Features
+     - Installs or uninstalls Windows Roles or Features on Windows Server. This module uses the Add/Remove-WindowsFeature Cmdlets, which is not available on client os machines.
 options:
   name:
     description:

@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: rds_param_group
@@ -161,7 +165,7 @@ def set_parameter(param, value, immediate):
                 # may be based on a variable (ie. {foo*3/4}) so
                 # just pass it on through to boto
                 converted_value = str(value)
-        elif type(value) == bool:
+        elif isinstance(value, bool):
             converted_value = 1 if value else 0
         else:
             converted_value = int(value)
@@ -234,7 +238,7 @@ def main():
     immediate               = module.params.get('immediate') or False
 
     if state == 'present':
-        for required in ['name', 'description', 'engine', 'params']:
+        for required in ['name', 'description', 'engine']:
             if not module.params.get(required):
                 module.fail_json(msg = str("Parameter %s required for state='present'" % required))
     else:

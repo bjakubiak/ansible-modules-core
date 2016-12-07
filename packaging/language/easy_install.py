@@ -22,6 +22,10 @@
 import tempfile
 import os.path
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: easy_install
@@ -90,10 +94,14 @@ author: "Matt Wright (@mattupstate)"
 
 EXAMPLES = '''
 # Examples from Ansible Playbooks
-- easy_install: name=pip state=latest
+- easy_install:
+    name: pip
+    state: latest
 
 # Install Bottle into the specified virtualenv.
-- easy_install: name=bottle virtualenv=/webapps/myapp/venv
+- easy_install:
+    name: bottle
+    virtualenv: /webapps/myapp/venv
 '''
 
 def _is_package_installed(module, name, easy_install, executable_arguments):
@@ -200,4 +208,5 @@ def main():
 # import module snippets
 from ansible.module_utils.basic import *
 
-main()
+if __name__ == '__main__':
+    main()

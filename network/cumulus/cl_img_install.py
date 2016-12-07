@@ -15,6 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: cl_img_install
@@ -23,19 +27,19 @@ author: "Cumulus Networks (@CumulusLinux)"
 short_description: Install a different Cumulus Linux version.
 description:
     - install a different version of Cumulus Linux in the inactive slot. For
-      more details go the Image Management User Guide @
-      http://docs.cumulusnetworks.com/
+      more details go the Image Management User Guide at
+      U(http://docs.cumulusnetworks.com/).
 options:
     src:
         description:
-            - full path to the Cumulus Linux binary image. Can be a local path,
+            - The full path to the Cumulus Linux binary image. Can be a local path,
               http or https URL. If the code version is in the name of the file,
               the module will assume this is the version of code you wish to
               install.
         required: true
     version:
         description:
-            - inform the module of the exact version one is installing. This
+            - Inform the module of the exact version one is installing. This
               overrides the automatic check of version in the file name. For
               example, if the binary file name is called CumulusLinux-2.2.3.bin,
               and version is set to '2.5.0', then the module will assume it is
@@ -46,7 +50,7 @@ options:
     switch_slot:
         description:
             - Switch slots after installing the image.
-              To run the installed code, reboot the switch
+              To run the installed code, reboot the switch.
         choices: ['yes', 'no']
         default: 'no'
         required: false
@@ -59,32 +63,40 @@ Example playbook entries using the cl_img_install module
 
 ## Download and install the image from a webserver.
 
-   - name: install image using using http url. Switch slots so the subsequent
-     will load the new version
-      cl_img_install: version=2.0.1
-          src='http://10.1.1.1/CumulusLinux-2.0.1.bin'
-          switch_slot=yes
+- name: Install image using using http url. Switch slots so the subsequent will load the new version
+  cl_img_install:
+    version: 2.0.1
+    src: http://10.1.1.1/CumulusLinux-2.0.1.bin
+    switch_slot: yes
 
 ## Copy the software from the ansible server to the switch.
 ## The module will get the code version from the filename
 ## The code will be installed in the alternate slot but the slot will not be primary
 ## A subsequent reload will not run the new code
 
-    - name: download cumulus linux to local system
-      get_url: src=ftp://cumuluslinux.bin dest=/root/CumulusLinux-2.0.1.bin
+- name: Download cumulus linux to local system
+  get_url:
+    src: ftp://cumuluslinux.bin
+    dest: /root/CumulusLinux-2.0.1.bin
 
-    - name: install image from local filesystem. Get version from the filename
-      cl_img_install:  src='/root/CumulusLinux-2.0.1.bin'
+- name: Install image from local filesystem. Get version from the filename.
+  cl_img_install:
+    src: /root/CumulusLinux-2.0.1.bin
 
 
 ## If the image name has been changed from the original name, use the `version` option
 ## to inform the module exactly what code version is been installed
 
-    - name: download cumulus linux to local system
-      get_url: src=ftp://CumulusLinux-2.0.1.bin dest=/root/image.bin
+- name: Download cumulus linux to local system
+  get_url:
+    src: ftp://CumulusLinux-2.0.1.bin
+    dest: /root/image.bin
 
-    - name: install image and switch slots. only reboot needed
-      cl_img_install: version=2.0.1 src=/root/image.bin switch_slot=yes'
+- name: install image and switch slots. only reboot needed
+  cl_img_install:
+    version: 2.0.1
+    src: /root/image.bin
+    switch_slot: yes
 '''
 
 RETURN = '''

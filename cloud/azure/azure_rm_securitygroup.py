@@ -19,6 +19,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: azure_rm_securitygroup
@@ -338,8 +342,6 @@ except ImportError:
     # This is handled in azure_rm_common
     pass
 
-NAME_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
-
 
 def validate_rule(rule, rule_type=None):
     '''
@@ -352,8 +354,6 @@ def validate_rule(rule, rule_type=None):
 
     if not rule.get('name'):
         raise Exception("Rule name value is required.")
-    if not NAME_PATTERN.match(rule.get('name')):
-        raise Exception("Rule name must contain only word characters plus '.','-','_'")
 
     priority = rule.get('priority', None)
     if not priority:
@@ -461,14 +461,14 @@ def create_rule_dict_from_obj(rule):
         id=rule.id,
         name=rule.name,
         description=rule.description,
-        protocol=rule.protocol.value,
+        protocol=rule.protocol,
         source_port_range=rule.source_port_range,
         destination_port_range=rule.destination_port_range,
         source_address_prefix=rule.source_address_prefix,
         destination_address_prefix=rule.destination_address_prefix,
-        access=rule.access.value,
+        access=rule.access,
         priority=rule.priority,
-        direction=rule.direction.value,
+        direction=rule.direction,
         provisioning_state=rule.provisioning_state,
         etag=rule.etag
     )
@@ -550,9 +550,6 @@ class AzureRMSecurityGroup(AzureRMModuleBase):
         if not self.location:
             # Set default location
             self.location = resource_group.location
-
-        if not NAME_PATTERN.match(self.name):
-            self.fail("Parameter error: name must contain only word characters and '.','-','_'")
 
         if self.rules:
             for rule in self.rules:

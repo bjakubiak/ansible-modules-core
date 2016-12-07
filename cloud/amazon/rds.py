@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: rds
@@ -115,7 +119,7 @@ options:
     description:
       - Port number that the DB instance uses for connections. Used only when command=create or command=replicate.
       - Prior to 2.0 it always defaults to null and the API would use 3306, it had to be set to other DB default values when not using MySql.
-        Starting at 2.0 it auotmaticaly defaults to what is expected for each c(db_engine).
+        Starting at 2.0 it automatically defaults to what is expected for each c(db_engine).
     required: false
     default: 3306 for mysql, 1521 for Oracle, 1433 for SQL Server, 5432 for PostgreSQL.
   upgrade:
@@ -223,7 +227,9 @@ requirements:
 author:
     - "Bruce Pennypacker (@bpennypacker)"
     - "Will Thames (@willthames)"
-
+extends_documentation_fragment:
+    - aws
+    - ec2
 '''
 
 # FIXME: the command stuff needs a 'state' like alias to make things consistent -- MPD
@@ -299,9 +305,9 @@ EXAMPLES = '''
      instance_name: MyNewInstanceName
      region: us-west-2
      vpc_security_groups: sg-xxx945xx
-          
-- debug: msg="The new db endpoint is {{ rds.instance.endpoint }}"
 
+- debug:
+    msg: "The new db endpoint is {{ rds.instance.endpoint }}"
 '''
 
 import sys
@@ -320,6 +326,7 @@ except ImportError:
     has_rds2 = False
 
 DEFAULT_PORTS= {
+    'aurora': 3306,
     'mariadb': 3306,
     'mysql': 3306,
     'oracle': 1521,
@@ -538,8 +545,8 @@ class RDSDBInstance:
             'iops'               : self.instance.iops
             }
 
-        # Endpoint exists only if the instance is available
-        if self.status == 'available':
+        # Only assign an Endpoint if one is available
+        if hasattr(self.instance, 'endpoint'):
             d["endpoint"] = self.instance.endpoint[0]
             d["port"] = self.instance.endpoint[1]
             if self.instance.vpc_security_groups is not None:
@@ -586,9 +593,9 @@ class RDS2DBInstance:
         }
         if self.instance["VpcSecurityGroups"] is not None:
             d['vpc_security_groups'] = ','.join(x['VpcSecurityGroupId'] for x in self.instance['VpcSecurityGroups'])
-        if self.status == 'available':
-            d['endpoint'] = self.instance["Endpoint"]["Address"]
-            d['port'] = self.instance["Endpoint"]["Port"]
+        if "Endpoint" in self.instance and self.instance["Endpoint"] is not None:
+            d['endpoint'] = self.instance["Endpoint"].get('Address', None)
+            d['port'] = self.instance["Endpoint"].get('Port', None)
         else:
             d['endpoint'] = None
             d['port'] = None
@@ -1101,4 +1108,5 @@ def main():
 from ansible.module_utils.basic import *
 from ansible.module_utils.ec2 import *
 
-main()
+if __name__ == '__main__':
+    main()

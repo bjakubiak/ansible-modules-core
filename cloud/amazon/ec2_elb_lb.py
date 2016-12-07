@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = """
 ---
 module: ec2_elb_lb
@@ -24,7 +28,6 @@ short_description: Creates or destroys Amazon ELB.
 version_added: "1.5"
 author:
   - "Jim Dalton (@jsdalton)"
-  - "Rick Mendes (@rickmendes)"
 options:
   state:
     description:
@@ -136,7 +139,7 @@ options:
     version_added: "1.8"
   stickiness:
     description:
-      - An associative array of stickness policy settings. Policy will be applied to all listeners ( see example )
+      - An associative array of stickiness policy settings. Policy will be applied to all listeners ( see example )
     required: false
     version_added: "2.0"
   wait:
@@ -314,10 +317,10 @@ EXAMPLES = """
       - us-east-1d
     listeners:
       - protocol: http
-      - load_balancer_port: 80
-      - instance_port: 80
+        load_balancer_port: 80
+        instance_port: 80
 
-# Create an ELB with load balanacer stickiness enabled
+# Create an ELB with load balancer stickiness enabled
 - local_action:
     module: ec2_elb_lb
     name: "New ELB"
@@ -328,8 +331,8 @@ EXAMPLES = """
       - us-east-1d
     listeners:
       - protocol: http
-      - load_balancer_port: 80
-      - instance_port: 80
+        load_balancer_port: 80
+        instance_port: 80
     stickiness:
       type: loadbalancer
       enabled: yes
@@ -346,8 +349,8 @@ EXAMPLES = """
       - us-east-1d
     listeners:
       - protocol: http
-      - load_balancer_port: 80
-      - instance_port: 80
+        load_balancer_port: 80
+        instance_port: 80
     stickiness:
       type: application
       enabled: yes
@@ -364,8 +367,8 @@ EXAMPLES = """
       - us-east-1d
     listeners:
       - protocol: http
-      - load_balancer_port: 80
-      - instance_port: 80
+        load_balancer_port: 80
+        instance_port: 80
     tags:
       Name: "New ELB"
       stack: "production"
@@ -382,8 +385,8 @@ EXAMPLES = """
       - us-east-1d
     listeners:
       - protocol: http
-      - load_balancer_port: 80
-      - instance_port: 80
+        load_balancer_port: 80
+        instance_port: 80
     tags: {}
 """
 
@@ -391,6 +394,7 @@ try:
     import boto
     import boto.ec2.elb
     import boto.ec2.elb.attributes
+    import boto.vpc
     from boto.ec2.elb.healthcheck import HealthCheck
     from boto.ec2.tag import Tag
     from boto.regioninfo import RegionInfo
@@ -418,6 +422,12 @@ def _throttleable_operation(max_retries):
                         raise
         return _do_op
     return _operation_wrapper
+
+def _get_vpc_connection(module, region, aws_connect_params):
+    try:
+        return connect_to_aws(boto.vpc, region, **aws_connect_params)
+    except (boto.exception.NoAuthHandlerFound, AnsibleAWSError) as e:
+        module.fail_json(msg=str(e))
 
 
 _THROTTLING_RETRIES = 5
@@ -456,7 +466,7 @@ class ElbManager(object):
         self.wait = wait
         self.wait_timeout = wait_timeout
         self.tags = tags
-        
+
         self.aws_connect_params = aws_connect_params
         self.region = region
 
@@ -498,7 +508,7 @@ class ElbManager(object):
         self._set_instance_ids()
 
         self._set_tags()
-        
+
     def ensure_gone(self):
         """Destroy the ELB"""
         if self.elb:
@@ -610,7 +620,7 @@ class ElbManager(object):
                     info['cross_az_load_balancing'] = 'no'
 
             # return stickiness info?
-            
+
             info['tags'] = self.tags
 
         return info
@@ -976,7 +986,7 @@ class ElbManager(object):
             self.elb_conn.modify_lb_attribute(self.name, 'ConnectingSettings', attributes.connecting_settings)
 
     def _policy_name(self, policy_type):
-        return __file__.split('/')[-1].replace('_', '-')  + '-' + policy_type
+        return __file__.split('/')[-1].split('.')[0].replace('_', '-')  + '-' + policy_type
 
     def _create_policy(self, policy_param, policy_meth, policy):
         getattr(self.elb_conn, policy_meth )(policy_param, self.elb.name, policy)
@@ -1172,7 +1182,7 @@ class ElbManager(object):
         """Add/Delete tags"""
         if self.tags is None:
             return
-        
+
         params = {'LoadBalancerNames.member.1': self.name}
 
         tagdict = dict()
@@ -1183,8 +1193,8 @@ class ElbManager(object):
                                                   [('member', Tag)])
             tagdict = dict((tag.Key, tag.Value) for tag in current_tags
                            if hasattr(tag, 'Key'))
-            
-        # Add missing tags 
+
+        # Add missing tags
         dictact = dict(set(self.tags.items()) - set(tagdict.items()))
         if dictact:
             for i, key in enumerate(dictact):
@@ -1194,7 +1204,7 @@ class ElbManager(object):
             self.elb_conn.make_request('AddTags', params)
             self.changed=True
 
-        # Remove extra tags 
+        # Remove extra tags
         dictact = dict(set(tagdict.items()) - set(self.tags.items()))
         if dictact:
             for i, key in enumerate(dictact):
@@ -1202,7 +1212,7 @@ class ElbManager(object):
 
             self.elb_conn.make_request('RemoveTags', params)
             self.changed=True
-    
+
     def _get_health_check_target(self):
         """Compose target string from healthcheck parameters"""
         protocol = self.health_check['ping_protocol'].upper()
@@ -1276,9 +1286,9 @@ def main():
     wait = module.params['wait']
     wait_timeout = module.params['wait_timeout']
     tags = module.params['tags']
-    
+
     if state == 'present' and not listeners:
-        module.fail_json(msg="At least one port is required for ELB creation")
+        module.fail_json(msg="At least one listener is required for ELB creation")
 
     if state == 'present' and not (zones or subnets):
         module.fail_json(msg="At least one availability zone or subnet is required for ELB creation")
@@ -1290,7 +1300,13 @@ def main():
         security_group_ids = []
         try:
             ec2 = ec2_connect(module)
-            grp_details = ec2.get_all_security_groups()
+            if subnets: # We have at least one subnet, ergo this is a VPC
+                vpc_conn = _get_vpc_connection(module=module, region=region, aws_connect_params=aws_connect_params)
+                vpc_id = vpc_conn.get_all_subnets([subnets[0]])[0].vpc_id
+                filters = {'vpc_id': vpc_id}
+            else:
+                filters = None
+            grp_details = ec2.get_all_security_groups(filters=filters)
 
             for group_name in security_group_names:
                 if isinstance(group_name, basestring):

@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: route53
@@ -217,13 +221,13 @@ EXAMPLES = '''
 
 # Add an alias record that points to an Amazon ELB:
 - route53:
-      command=create
-      zone=foo.com
-      record=elb.foo.com
-      type=A
-      value="{{ elb_dns_name }}"
-      alias=True
-      alias_hosted_zone_id="{{ elb_zone_id }}"
+    command: create
+    zone: foo.com
+    record: elb.foo.com
+    type: A
+    value: "{{ elb_dns_name }}"
+    alias: True
+    alias_hosted_zone_id: "{{ elb_zone_id }}"
 
 # Retrieve the details for elb.foo.com
 - route53:
@@ -246,14 +250,14 @@ EXAMPLES = '''
 
 # Add an alias record that points to an Amazon ELB and evaluates it health:
 - route53:
-      command=create
-      zone=foo.com
-      record=elb.foo.com
-      type=A
-      value="{{ elb_dns_name }}"
-      alias=True
-      alias_hosted_zone_id="{{ elb_zone_id }}"
-      alias_evaluate_target_health=True
+    command: create
+    zone: foo.com
+    record: elb.foo.com
+    type: A
+    value: "{{ elb_dns_name }}"
+    alias: True
+    alias_hosted_zone_id: "{{ elb_zone_id }}"
+    alias_evaluate_target_health: True
 
 # Add an AAAA record with Hosted Zone ID.  Note that because there are colons in the value
 # that the entire parameter list must be quoted:
@@ -440,10 +444,10 @@ def main():
 
     value_list = ()
 
-    if type(value_in) is str:
+    if isinstance(value_in, str):
         if value_in:
             value_list = sorted([s.strip() for s in value_in.split(',')])
-    elif type(value_in)  is list:
+    elif isinstance(value_in, list):
         value_list = sorted(value_in)
 
     if zone_in[-1:] != '.':
@@ -586,4 +590,5 @@ def main():
 from ansible.module_utils.basic import *
 from ansible.module_utils.ec2 import *
 
-main()
+if __name__ == '__main__':
+    main()

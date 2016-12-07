@@ -16,6 +16,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = """
 ---
 module: junos_package
@@ -31,19 +35,19 @@ extends_documentation_fragment: junos
 options:
   src:
     description:
-      - The O(src) argument specifies the path to the source package to be
+      - The I(src) argument specifies the path to the source package to be
         installed on the remote device in the advent of a version mismatch.
-        The O(src) argument can be either a localized path or a full
-        path to the package file to install
+        The I(src) argument can be either a localized path or a full
+        path to the package file to install.
     required: true
     default: null
     aliases: ['package']
   version:
     description:
-      - The O(version) argument can be used to explicitly specify the
+      - The I(version) argument can be used to explicitly specify the
         version of the package that should be installed on the remote
-        device.  If the O(version) argument is not specified, then
-        the version is extracts from the O(src) filename
+        device.  If the I(version) argument is not specified, then
+        the version is extracts from the I(src) filename.
     required: false
     default: null
   reboot:
@@ -58,18 +62,18 @@ options:
     choices: ['true', 'false']
   no_copy:
     description:
-      - The O(no_copy) arugment is responsible for instructing the remote
-        device on where to isntall the package from.  When enabled, the
+      - The I(no_copy) argument is responsible for instructing the remote
+        device on where to install the package from.  When enabled, the
         package is transferred to the remote device prior to installing.
     required: false
     default: false
     choices: ['true', 'false']
   force:
     description:
-      - The O(force) argument instructs the module to bypass the package
-        version check and install the packaged identified in O(src) on
+      - The I(force) argument instructs the module to bypass the package
+        version check and install the packaged identified in I(src) on
         the remote device.
-    require: true
+    required: true
     default: false
     choices: ['true', 'false']
 requirements:
@@ -92,6 +96,9 @@ EXAMPLES = """
     src: junos-vsrx-12.1X46-D10.2-domestic.tgz
     reboot: no
 """
+import ansible.module_utils.junos
+
+from ansible.module_utils.network import NetworkModule
 
 try:
     from jnpr.junos.utils.sw import SW
@@ -127,8 +134,8 @@ def main():
         transport=dict(default='netconf', choices=['netconf'])
     )
 
-    module = get_module(argument_spec=spec,
-                        supports_check_mode=True)
+    module = NetworkModule(argument_spec=spec,
+                           supports_check_mode=True)
 
     if not HAS_SW:
         module.fail_json(msg='Missing jnpr.junos.utils.sw module')
@@ -137,8 +144,8 @@ def main():
 
     do_upgrade = module.params['force'] or False
     if not module.params['force']:
-        has_ver = module.get_facts().get('version')
-        wants_ver = module.params['version'] or package_version(module)
+        has_ver = module.connection.get_facts().get('version')
+        wants_ver = module.params['version']
         do_upgrade = has_ver != wants_ver
 
     if do_upgrade:
@@ -148,8 +155,6 @@ def main():
 
     module.exit_json(**result)
 
-from ansible.module_utils.basic import *
-from ansible.module_utils.junos import *
 
 if __name__ == '__main__':
     main()

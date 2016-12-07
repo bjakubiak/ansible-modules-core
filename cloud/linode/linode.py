@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: linode
@@ -443,14 +447,14 @@ def main():
             state = dict(default='present', choices=['active', 'present', 'started',
                                                      'deleted', 'absent', 'stopped',
                                                      'restarted']),
-            api_key = dict(),
+            api_key = dict(no_log=True),
             name = dict(type='str'),
             plan = dict(type='int'),
             distribution = dict(type='int'),
             datacenter = dict(type='int'),
             linode_id = dict(type='int', aliases=['lid']),
             payment_term = dict(type='int', default=1, choices=[1, 12, 24]),
-            password = dict(type='str'),
+            password = dict(type='str', no_log=True),
             ssh_pub_key = dict(type='str'),
             swap = dict(type='int', default=512),
             wait = dict(type='bool', default=True),

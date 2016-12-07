@@ -16,6 +16,10 @@
 
 # This is a DOCUMENTATION stub specific to this module, it extends
 # a documentation fragment located in ansible.utils.module_docs_fragments
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: rax
@@ -182,7 +186,7 @@ options:
     description:
       - how long before wait gives up, in seconds
     default: 300
-author: 
+author:
     - "Jesse Keating (@j2sol)"
     - "Matt Martz (@sivel)"
 notes:
@@ -287,7 +291,7 @@ def create(module, names=[], flavor=None, image=None, meta={}, key_name=None,
 
     if user_data and os.path.isfile(os.path.expanduser(user_data)):
         try:
-            user_data = os.path.expanduser('user_data')
+            user_data = os.path.expanduser(user_data)
             f = open(user_data)
             user_data = f.read()
             f.close()
@@ -890,4 +894,6 @@ from ansible.module_utils.basic import *
 from ansible.module_utils.rax import *
 
 # invoke the module
-main()
+
+if __name__ == '__main__':
+    main()

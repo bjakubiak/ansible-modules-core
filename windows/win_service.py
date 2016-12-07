@@ -21,6 +21,10 @@
 # this is a windows documentation stub.  actual code lives in the .ps1
 # file of the same name
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: win_service
@@ -59,12 +63,12 @@ author: "Chris Hoffman (@chrishoffman)"
 '''
 
 EXAMPLES = '''
-  # Restart a service
+- name: Restart a service
   win_service:
     name: spooler
     state: restarted
 
-  # Set service startup mode to auto and ensure it is started
+- name: Set service startup mode to auto and ensure it is started
   win_service:
     name: spooler
     start_mode: auto

@@ -23,6 +23,10 @@ except ImportError:
     HAS_SHADE = False
 
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: os_subnet
@@ -42,7 +46,7 @@ options:
    network_name:
      description:
         - Name of the network to which the subnet should be attached
-        - requried when I(state) is 'present'
+        - Required when I(state) is 'present'
      required: false
    name:
      description:

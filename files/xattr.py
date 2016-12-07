@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: xattr
@@ -63,16 +67,25 @@ author: "Brian Coca (@bcoca)"
 
 EXAMPLES = '''
 # Obtain the extended attributes  of /etc/foo.conf
-- xattr: name=/etc/foo.conf
+- xattr:
+    name: /etc/foo.conf
 
 # Sets the key 'foo' to value 'bar'
-- xattr: path=/etc/foo.conf key=user.foo value=bar
+- xattr:
+    path: /etc/foo.conf
+    key: user.foo
+    value: bar
 
 # Removes the key 'foo'
-- xattr: name=/etc/foo.conf key=user.foo state=absent
+- xattr:
+    name: /etc/foo.conf
+    key: user.foo
+    state: absent
 '''
 
 import operator
+import re
+import os
 
 def get_xattr_keys(module,path,follow):
     cmd = [ module.get_bin_path('getfattr', True) ]
@@ -202,7 +215,7 @@ def main():
     module.exit_json(changed=changed, msg=msg, xattr=res)
 
 # import module snippets
-from ansible.module_utils.basic import *
-
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.pycompat24 import get_exception
 if __name__ == '__main__':
     main()

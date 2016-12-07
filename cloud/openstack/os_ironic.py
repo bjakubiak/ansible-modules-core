@@ -23,6 +23,10 @@ except ImportError:
     HAS_SHADE = False
 
 import jsonpatch
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: os_ironic
@@ -188,7 +192,7 @@ def _choose_id_value(module):
 def _choose_if_password_only(module, patch):
     if len(patch) is 1:
         if 'password' in patch[0]['path'] and module.params['skip_update_of_masked_password']:
-            # Return false to aabort update as the password appears
+            # Return false to abort update as the password appears
             # to be the only element in the patch.
             return False
     return True

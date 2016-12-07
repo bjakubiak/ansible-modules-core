@@ -19,6 +19,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: package
@@ -53,9 +57,13 @@ notes:
 '''
 EXAMPLES = '''
 - name: install the latest version of ntpdate
-  package: name=ntpdate state=latest
+  package:
+    name: ntpdate
+    state: latest
 
 # This uses a variable as this changes per distribution.
 - name: remove the apache package
-  package : name={{apache}} state=absent
+  package:
+    name: "{{ apache }}"
+    state: absent
 '''

@@ -16,6 +16,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = """
 ---
 module: junos_netconf
@@ -30,39 +34,62 @@ description:
     resources as defined in RFC 6242.
 extends_documentation_fragment: junos
 options:
-  listens_on:
+  netconf_port:
     description:
       - This argument specifies the port the netconf service should
         listen on for SSH connections.  The default port as defined
         in RFC 6242 is 830.
-    required: true
+    required: false
     default: 830
+    aliases: ['listens_on']
+    version_added: "2.2"
   state:
     description:
       - Specifies the state of the M(junos_netconf) resource on
-        the remote device.  If the O(state) argument is set to
+        the remote device.  If the I(state) argument is set to
         I(present) the netconf service will be configured.  If the
-        O(state) argument is set to I(absent) the netconf service
+        I(state) argument is set to I(absent) the netconf service
         will be removed from the configuration.
-    required: true
+    required: false
     default: present
     choices: ['present', 'absent']
 """
 
 EXAMPLES = """
+# Note: examples below use the following provider dict to handle
+#       transport and authentication to the node.
+vars:
+  cli:
+    host: "{{ inventory_hostname }}"
+    username: ansible
+    password: Ansible
+    transport: cli
+
 - name: enable netconf service on port 830
   junos_netconf:
     listens_on: 830
     state: present
+    provider: "{{ cli }}"
 
 - name: disable netconf service
   junos_netconf:
     state: absent
+    provider: "{{ cli }}"
 """
 
 RETURN = """
+commands:
+  description: Returns the command sent to the remote device
+  returned: when changed is True
+  type: str
+  sample: 'set system services netconf ssh port 830'
 """
 import re
+
+import ansible.module_utils.junos
+
+from ansible.module_utils.basic import get_exception
+from ansible.module_utils.network import NetworkModule, NetworkError
 
 def parse_port(config):
     match = re.search(r'port (\d+)', config)
@@ -71,7 +98,7 @@ def parse_port(config):
 
 def get_instance(module):
     cmd = 'show configuration system services netconf'
-    cfg = module.run_commands(cmd)[0]
+    cfg = module.cli(cmd)[0]
     result = dict(state='absent')
     if cfg:
         result = dict(state='present')
@@ -83,40 +110,43 @@ def main():
     """
 
     argument_spec = dict(
-        listens_on=dict(type='int', default=830),
+        netconf_port=dict(type='int', default=830, aliases=['listens_on']),
         state=dict(default='present', choices=['present', 'absent']),
         transport=dict(default='cli', choices=['cli'])
     )
 
-    module = get_module(argument_spec=argument_spec,
-                        supports_check_mode=True)
+    module = NetworkModule(argument_spec=argument_spec,
+                           supports_check_mode=True)
 
     state = module.params['state']
-    port = module.params['listens_on']
+    port = module.params['netconf_port']
 
     result = dict(changed=False)
 
     instance = get_instance(module)
-    commands = None
 
     if state == 'present' and instance.get('state') == 'absent':
         commands = 'set system services netconf ssh port %s' % port
+    elif state == 'present' and port != instance.get('port'):
+        commands = 'set system services netconf ssh port %s' % port
     elif state == 'absent' and instance.get('state') == 'present':
         commands = 'delete system services netconf'
-    elif port != instance.get('port'):
-        commands = 'set system services netconf ssh port %s' % port
+    else:
+        commands = None
 
     if commands:
         if not module.check_mode:
-            comment = 'configuration updated by junos_netconf'
-            module.connection.configure(commands, comment=comment)
+            try:
+                comment = 'configuration updated by junos_netconf'
+                module.config(commands, comment=comment)
+            except NetworkError:
+                exc = get_exception()
+                module.fail_json(msg=str(exc), **exc.kwargs)
         result['changed'] = True
+        result['commands'] = commands
 
     module.exit_json(**result)
 
-from ansible.module_utils.basic import *
-from ansible.module_utils.shell import *
-from ansible.module_utils.junos import *
 
 if __name__ == '__main__':
     main()

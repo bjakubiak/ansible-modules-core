@@ -19,6 +19,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: rpm_key
@@ -39,7 +43,7 @@ options:
       default: "present"
       choices: [present, absent]
       description:
-          - Wheather the key will be imported or removed from the rpm db.
+          - If the key will be imported or removed from the rpm db.
     validate_certs:
       description:
           - If C(no) and the C(key) is a url starting with https, SSL certificates will not be validated. This should only be used
@@ -52,13 +56,19 @@ options:
 
 EXAMPLES = '''
 # Example action to import a key from a url
-- rpm_key: state=present key=http://apt.sw.be/RPM-GPG-KEY.dag.txt
+- rpm_key:
+    state: present
+    key: http://apt.sw.be/RPM-GPG-KEY.dag.txt
 
 # Example action to import a key from a file
-- rpm_key: state=present key=/path/to/key.gpg
+- rpm_key:
+    state: present
+    key: /path/to/key.gpg
 
 # Example action to ensure a key is not present in the db
-- rpm_key: state=absent key=DEADB33F
+- rpm_key:
+    state: absent
+    key: DEADB33F
 '''
 import re
 import os.path

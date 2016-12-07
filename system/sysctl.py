@@ -20,6 +20,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: sysctl
@@ -76,19 +80,37 @@ author: "David CHANIAL (@davixx) <david.chanial@gmail.com>"
 
 EXAMPLES = '''
 # Set vm.swappiness to 5 in /etc/sysctl.conf
-- sysctl: name=vm.swappiness value=5 state=present
+- sysctl:
+    name: vm.swappiness
+    value: 5
+    state: present
 
 # Remove kernel.panic entry from /etc/sysctl.conf
-- sysctl: name=kernel.panic state=absent sysctl_file=/etc/sysctl.conf
+- sysctl:
+    name: kernel.panic
+    state: absent
+    sysctl_file: /etc/sysctl.conf
 
 # Set kernel.panic to 3 in /tmp/test_sysctl.conf
-- sysctl: name=kernel.panic value=3 sysctl_file=/tmp/test_sysctl.conf reload=no
+- sysctl:
+    name: kernel.panic
+    value: 3
+    sysctl_file: /tmp/test_sysctl.conf
+    reload: no
 
 # Set ip forwarding on in /proc and do not reload the sysctl file
-- sysctl: name="net.ipv4.ip_forward" value=1 sysctl_set=yes
+- sysctl:
+    name: net.ipv4.ip_forward
+    value: 1
+    sysctl_set: yes
 
 # Set ip forwarding on in /proc and in the sysctl file and reload if necessary
-- sysctl: name="net.ipv4.ip_forward" value=1 sysctl_set=yes state=present reload=yes
+- sysctl:
+    name: net.ipv4.ip_forward
+    value: 1
+    sysctl_set: yes
+    state: present
+    reload: yes
 '''
 
 # ==============================================================

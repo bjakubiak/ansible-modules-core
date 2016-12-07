@@ -16,6 +16,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this software.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['deprecated'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: glance_image
@@ -44,7 +48,7 @@ options:
      description:
         - The keystone url for authentication
      required: false
-     default: 'http://127.0.0.1:35357/v2.0/'
+     default: http://127.0.0.1:35357/v2.0/
    region_name:
      description:
         - Name of the region
@@ -120,15 +124,16 @@ requirements:
 '''
 
 EXAMPLES = '''
-# Upload an image from an HTTP URL
-- glance_image: login_username=admin
-                login_password=passme
-                login_tenant_name=admin
-                name=cirros
-                container_format=bare
-                disk_format=qcow2
-                state=present
-                copy_from=http:launchpad.net/cirros/trunk/0.3.0/+download/cirros-0.3.0-x86_64-disk.img
+- name: Upload an image from an HTTP URL
+  glance_image:
+    login_username: admin
+    login_password: passme
+    login_tenant_name: admin
+    name: cirros
+    container_format: bare
+    disk_format: qcow2
+    state: present
+    copy_from: http://launchpad.net/cirros/trunk/0.3.0/+download/cirros-0.3.0-x86_64-disk.img
 '''
 
 import time

@@ -23,6 +23,10 @@ except ImportError:
     HAS_SHADE = False
 
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: os_object
@@ -60,11 +64,19 @@ options:
 '''
 
 EXAMPLES = '''
-# Creates a object named 'fstab' in the 'config' container
-- os_object: cloud=mordred state=present name=fstab container=config filename=/etc/fstab
+- name: "Create a object named 'fstab' in the 'config' container"
+  os_object:
+    cloud: mordred
+    state: present
+    name: fstab
+    container: config
+    filename: /etc/fstab
 
-# Deletes a container called config and all of its contents
-- os_object: cloud=rax-iad state=absent container=config
+- name: Delete a container called config and all of its contents
+  os_object:
+    cloud: rax-iad
+    state: absent
+    container: config
 '''
 
 

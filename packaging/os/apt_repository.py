@@ -21,6 +21,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: apt_repository
@@ -28,9 +32,8 @@ short_description: Add and remove APT repositories
 description:
     - Add or remove an APT repositories in Ubuntu and Debian.
 notes:
-    - This module works on Debian and Ubuntu and requires C(python-apt).
+    - This module works on Debian, Ubuntu and their derivatives.
     - This module supports Debian Squeeze (version 6) as well as its successors.
-    - This module treats Debian and Ubuntu distributions separately. So PPA could be installed only on Ubuntu machines.
 options:
     repo:
         required: true
@@ -70,32 +73,57 @@ options:
               Defaults to a file name based on the repository source url.
               The .list extension will be automatically added.
         required: false
+    codename:
+        version_added: '2.3'
+        description:
+            - Override the distribution codename to use for PPA repositories.
+              Should usually only be set when working with a PPA on a non-Ubuntu target (e.g. Debian or Mint)
+        required: false
 author: "Alexander Saltanov (@sashka)"
 version_added: "0.7"
-requirements: [ python-apt ]
+requirements:
+   - python-apt (python 2)
+   - python3-apt (python 3)
 '''
 
 EXAMPLES = '''
 # Add specified repository into sources list.
-apt_repository: repo='deb http://archive.canonical.com/ubuntu hardy partner' state=present
+- apt_repository:
+    repo: deb http://archive.canonical.com/ubuntu hardy partner
+    state: present
 
 # Add specified repository into sources list using specified filename.
-apt_repository: repo='deb http://dl.google.com/linux/chrome/deb/ stable main' state=present filename='google-chrome'
+- apt_repository:
+    repo: deb http://dl.google.com/linux/chrome/deb/ stable main
+    state: present
+    filename: 'google-chrome'
 
 # Add source repository into sources list.
-apt_repository: repo='deb-src http://archive.canonical.com/ubuntu hardy partner' state=present
+- apt_repository:
+    repo: deb-src http://archive.canonical.com/ubuntu hardy partner
+    state: present
 
 # Remove specified repository from sources list.
-apt_repository: repo='deb http://archive.canonical.com/ubuntu hardy partner' state=absent
+- apt_repository:
+    repo: deb http://archive.canonical.com/ubuntu hardy partner
+    state: absent
 
-# On Ubuntu target: add nginx stable repository from PPA and install its signing key.
-# On Debian target: adding PPA is not available, so it will fail immediately.
-apt_repository: repo='ppa:nginx/stable'
+# Add nginx stable repository from PPA and install its signing key.
+# On Ubuntu target:
+- apt_repository:
+    repo: 'ppa:nginx/stable'
+
+# On Debian target
+- apt_repository:
+    repo: 'ppa:nginx/stable'
+    codename: 'trusty'
+    repo: 'ppa:nginx/stable'
 '''
 
 import glob
 import os
 import re
+import sys
 import tempfile
 
 try:
@@ -108,8 +136,15 @@ except ImportError:
     distro = None
     HAVE_PYTHON_APT = False
 
+if sys.version_info[0] < 3:
+    PYTHON_APT = 'python-apt'
+else:
+    PYTHON_APT = 'python3-apt'
+
+DEFAULT_SOURCES_PERM = int('0644', 8)
 
 VALID_SOURCE_TYPES = ('deb', 'deb-src')
+
 
 def install_python_apt(module):
 
@@ -118,8 +153,8 @@ def install_python_apt(module):
         if apt_get_path:
             rc, so, se = module.run_command([apt_get_path, 'update'])
             if rc != 0:
-                module.fail_json(msg="Failed to auto-install python-apt. Error was: '%s'" % se.strip())
-            rc, so, se = module.run_command([apt_get_path, 'install', 'python-apt', '-y', '-q'])
+                module.fail_json(msg="Failed to auto-install %s. Error was: '%s'" % (PYTHON_APT, se.strip()))
+            rc, so, se = module.run_command([apt_get_path, 'install', PYTHON_APT, '-y', '-q'])
             if rc == 0:
                 global apt, apt_pkg, aptsources_distro, distro, HAVE_PYTHON_APT
                 import apt
@@ -128,9 +163,10 @@ def install_python_apt(module):
                 distro = aptsources_distro.get_distro()
                 HAVE_PYTHON_APT = True
             else:
-                module.fail_json(msg="Failed to auto-install python-apt. Error was: '%s'" % se.strip())
+                module.fail_json(msg="Failed to auto-install %s. Error was: '%s'" % (PYTHON_APT, se.strip()))
     else:
-        module.fail_json(msg="python-apt must be installed to use check mode")
+        module.fail_json(msg="%s must be installed to use check mode" % PYTHON_APT)
+
 
 class InvalidSource(Exception):
     pass
@@ -254,7 +290,7 @@ class SourcesList(object):
         self.files[file] = group
 
     def save(self):
-        for filename, sources in self.files.items():
+        for filename, sources in list(self.files.items()):
             if sources:
                 d, fn = os.path.split(filename)
                 fd, tmp_path = tempfile.mkstemp(prefix=".%s-" % fn, dir=d)
@@ -280,7 +316,7 @@ class SourcesList(object):
 
                 # allow the user to override the default mode
                 if filename in self.new_repos:
-                    this_mode = self.module.params['mode']
+                    this_mode = self.module.params.get('mode', DEFAULT_SOURCES_PERM)
                     self.module.set_mode_if_different(filename, this_mode, False)
             else:
                 del self.files[filename]
@@ -364,6 +400,7 @@ class UbuntuSourcesList(SourcesList):
     def __init__(self, module, add_ppa_signing_keys_callback=None):
         self.module = module
         self.add_ppa_signing_keys_callback = add_ppa_signing_keys_callback
+        self.codename = module.params['codename'] or distro.codename
         super(UbuntuSourcesList, self).__init__(module)
 
     def _get_ppa_info(self, owner_name, ppa_name):
@@ -373,7 +410,7 @@ class UbuntuSourcesList(SourcesList):
         response, info = fetch_url(self.module, lp_api, headers=headers)
         if info['status'] != 200:
             self.module.fail_json(msg="failed to fetch PPA information, error was: %s" % info['msg'])
-        return json.load(response)
+        return json.loads(to_native(response.read()))
 
     def _expand_ppa(self, path):
         ppa = path.split(':')[1]
@@ -383,7 +420,7 @@ class UbuntuSourcesList(SourcesList):
         except IndexError:
             ppa_name = 'ppa'
 
-        line = 'deb http://ppa.launchpad.net/%s/%s/ubuntu %s main' % (ppa_owner, ppa_name, distro.codename)
+        line = 'deb http://ppa.launchpad.net/%s/%s/ubuntu %s main' % (ppa_owner, ppa_name, self.codename)
         return line, ppa_owner, ppa_name
 
     def _key_already_exists(self, key_fingerprint):
@@ -404,7 +441,7 @@ class UbuntuSourcesList(SourcesList):
                     command = ['apt-key', 'adv', '--recv-keys', '--keyserver', 'hkp://keyserver.ubuntu.com:80', info['signing_key_fingerprint']]
                     self.add_ppa_signing_keys_callback(command)
 
-            file = file or self._suggest_filename('%s_%s' % (line, distro.codename))
+            file = file or self._suggest_filename('%s_%s' % (line, self.codename))
         else:
             source = self._parse(line, raise_if_invalid_or_disabled=True)[2]
             file = file or self._suggest_filename(source)
@@ -452,12 +489,13 @@ def main():
         argument_spec=dict(
             repo=dict(required=True),
             state=dict(choices=['present', 'absent'], default='present'),
-            mode=dict(required=False, default=int('0644',8)),
+            mode=dict(required=False, type='raw'),
             update_cache = dict(aliases=['update-cache'], type='bool', default='yes'),
             filename=dict(required=False, default=None),
             # this should not be needed, but exists as a failsafe
             install_python_apt=dict(required=False, default="yes", type='bool'),
             validate_certs = dict(default='yes', type='bool'),
+            codename = dict(required=False),
         ),
         supports_check_mode=True,
     )
@@ -466,21 +504,21 @@ def main():
     repo = module.params['repo']
     state = module.params['state']
     update_cache = module.params['update_cache']
+    # Note: mode is referenced in SourcesList class via the passed in module (self here)
+
     sourceslist = None
 
     if not HAVE_PYTHON_APT:
         if params['install_python_apt']:
             install_python_apt(module)
         else:
-            module.fail_json(msg='python-apt is not installed, and install_python_apt is False')
+            module.fail_json(msg='%s is not installed, and install_python_apt is False' % PYTHON_APT)
 
-    if isinstance(distro, aptsources_distro.UbuntuDistribution):
+    if isinstance(distro, aptsources_distro.Distribution):
         sourceslist = UbuntuSourcesList(module,
             add_ppa_signing_keys_callback=get_add_ppa_signing_key_callback(module))
-    elif isinstance(distro, aptsources_distro.Distribution):
-        sourceslist = SourcesList(module)
     else:
-        module.fail_json(msg='Module apt_repository supports only Debian and Ubuntu.')
+        module.fail_json(msg='Module apt_repository is not supported on target.')
 
     sources_before = sourceslist.dump()
 
@@ -522,4 +560,5 @@ def main():
 from ansible.module_utils.basic import *
 from ansible.module_utils.urls import *
 
-main()
+if __name__ == '__main__':
+    main()

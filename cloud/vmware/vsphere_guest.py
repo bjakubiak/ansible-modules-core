@@ -19,6 +19,7 @@
 # TODO:
 # Ability to set CPU/Memory reservations
 
+
 try:
     import json
 except ImportError:
@@ -35,6 +36,10 @@ except ImportError:
     pass
 
 import ssl
+
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
 
 DOCUMENTATION = '''
 ---
@@ -262,7 +267,7 @@ EXAMPLES = '''
     vm_extra_config:
       folder: MyFolder
 
-# Task to gather facts from a vSphere cluster only if the system is a VMWare guest
+# Task to gather facts from a vSphere cluster only if the system is a VMware guest
 
 - vsphere_guest:
     vcenter_hostname: vcenter.mydomain.local
@@ -736,7 +741,7 @@ def deploy_template(vsphere_client, guest, resource_pool, template_src, esxi, mo
 
     try:
         if not vmTarget:
-            cloneArgs = dict(resourcepool=rpmor, power_on=power_on_after_clone)
+            cloneArgs = dict(resourcepool=rpmor, power_on=False)
 
             if snapshot_to_clone is not None:
                 #check if snapshot_to_clone is specified, Create a Linked Clone instead of a full clone.
@@ -748,6 +753,18 @@ def deploy_template(vsphere_client, guest, resource_pool, template_src, esxi, mo
                 cloneArgs["folder"] = vm_extra_config.get("folder")
 
             vmTemplate.clone(guest, **cloneArgs)
+
+            vm = vsphere_client.get_vm_by_name(guest)
+
+            # VM was created. If there is any extra config options specified, set
+            if vm_extra_config:
+                vm.set_extra_config(vm_extra_config)
+
+            # Power on if asked
+            if power_on_after_clone == True:
+                state = 'powered_on'
+                power_state(vm, state, True)
+
             changed = True
         else:
             changed = False
@@ -974,7 +991,7 @@ def reconfigure_vm(vsphere_client, vm, module, esxi, resource_pool, cluster_name
         disk_num = 0
         dev_changes = []
         disks_changed = {}
-        for disk in sorted(vm_disk.iterkeys()):
+        for disk in sorted(vm_disk):
             try:
                 disksize = int(vm_disk[disk]['size_gb'])
                 # Convert the disk size to kilobytes
@@ -1330,7 +1347,7 @@ def create_vm(vsphere_client, module, esxi, resource_pool, cluster_name, guest, 
     if vm_disk:
         disk_num = 0
         disk_key = 0
-        for disk in sorted(vm_disk.iterkeys()):
+        for disk in sorted(vm_disk):
             try:
                 datastore = vm_disk[disk]['datastore']
             except KeyError:
@@ -1386,7 +1403,7 @@ def create_vm(vsphere_client, module, esxi, resource_pool, cluster_name, guest, 
         add_floppy(module, vsphere_client, config_target, config, devices,
                   default_devs, floppy_type, floppy_image_path)
     if vm_nic:
-        for nic in sorted(vm_nic.iterkeys()):
+        for nic in sorted(vm_nic):
             try:
                 nictype = vm_nic[nic]['type']
             except KeyError:
@@ -1547,6 +1564,7 @@ def gather_facts(vm):
         'hw_guest_full_name':  vm.properties.config.guestFullName,
         'hw_guest_id': vm.properties.config.guestId,
         'hw_product_uuid': vm.properties.config.uuid,
+        'hw_instance_uuid': vm.properties.config.instanceUuid,
         'hw_processor_count': vm.properties.config.hardware.numCPU,
         'hw_memtotal_mb': vm.properties.config.hardware.memoryMB,
         'hw_interfaces':[],

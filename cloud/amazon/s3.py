@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: s3
@@ -131,9 +135,14 @@ options:
     version_added: "2.0"
   s3_url:
     description:
-      - S3 URL endpoint for usage with Eucalypus, fakes3, etc.  Otherwise assumes AWS
+      - S3 URL endpoint for usage with Ceph, Eucalypus, fakes3, etc.  Otherwise assumes AWS
     default: null
     aliases: [ S3_URL ]
+  rgw:
+    description:
+      - Enable Ceph RGW S3 support. This option requires an explicit url via s3_url.
+    default: false
+    version_added: "2.2"
   src:
     description:
       - The source file path when performing a PUT operation.
@@ -149,45 +158,101 @@ extends_documentation_fragment: aws
 '''
 
 EXAMPLES = '''
-# Simple PUT operation
-- s3: bucket=mybucket object=/my/desired/key.txt src=/usr/local/myfile.txt mode=put
+- name: Simple PUT operation
+  s3:
+    bucket: mybucket
+    object: /my/desired/key.txt
+    src: /usr/local/myfile.txt
+    mode: put
 
-# Simple GET operation
-- s3: bucket=mybucket object=/my/desired/key.txt dest=/usr/local/myfile.txt mode=get
+- name: Simple PUT operation in Ceph RGW S3
+  s3:
+    bucket: mybucket
+    object: /my/desired/key.txt
+    src: /usr/local/myfile.txt
+    mode: put
+    rgw: true
+    s3_url: "http://localhost:8000"
 
-# Get a specific version of an object.
-- s3: bucket=mybucket object=/my/desired/key.txt version=48c9ee5131af7a716edc22df9772aa6f dest=/usr/local/myfile.txt mode=get
+- name: Simple GET operation
+  s3:
+    bucket: mybucket
+    object: /my/desired/key.txt
+    dest: /usr/local/myfile.txt
+    mode: get
 
-# PUT/upload with metadata
-- s3: bucket=mybucket object=/my/desired/key.txt src=/usr/local/myfile.txt mode=put metadata='Content-Encoding=gzip,Cache-Control=no-cache'
+- name: Get a specific version of an object.
+  s3:
+    bucket: mybucket
+    object: /my/desired/key.txt
+    version: 48c9ee5131af7a716edc22df9772aa6f
+    dest: /usr/local/myfile.txt
+    mode: get
 
-# PUT/upload with custom headers
-- s3: bucket=mybucket object=/my/desired/key.txt src=/usr/local/myfile.txt mode=put headers=x-amz-grant-full-control=emailAddress=owner@example.com
+- name: PUT/upload with metadata
+  s3:
+    bucket: mybucket
+    object: /my/desired/key.txt
+    src: /usr/local/myfile.txt
+    mode: put
+    metadata: 'Content-Encoding=gzip,Cache-Control=no-cache'
 
-# List keys simple
-- s3: bucket=mybucket mode=list
+- name: PUT/upload with custom headers
+  s3:
+    bucket: mybucket
+    object: /my/desired/key.txt
+    src: /usr/local/myfile.txt
+    mode: put
+    headers: 'x-amz-grant-full-control=emailAddress=owner@example.com'
 
-# List keys all options
-- s3: bucket=mybucket mode=list prefix=/my/desired/ marker=/my/desired/0023.txt max_keys=472
+- name: List keys simple
+  s3:
+    bucket: mybucket
+    mode: list
 
-# Create an empty bucket
-- s3: bucket=mybucket mode=create permission=public-read
+- name: List keys all options
+  s3:
+    bucket: mybucket
+    mode: list
+    prefix: /my/desired/
+    marker: /my/desired/0023.txt
+    max_keys: 472
 
-# Create a bucket with key as directory, in the EU region
-- s3: bucket=mybucket object=/my/directory/path mode=create region=eu-west-1
+- name: Create an empty bucket
+  s3:
+    bucket: mybucket
+    mode: create
+    permission: public-read
 
-# Delete a bucket and all contents
-- s3: bucket=mybucket mode=delete
+- name: Create a bucket with key as directory, in the EU region
+  s3:
+    bucket: mybucket
+    object: /my/directory/path
+    mode: create
+    region: eu-west-1
 
-# GET an object but dont download if the file checksums match. New in 2.0
-- s3: bucket=mybucket object=/my/desired/key.txt dest=/usr/local/myfile.txt mode=get overwrite=different
+- name: Delete a bucket and all contents
+  s3:
+    bucket: mybucket
+    mode: delete
 
-# Delete an object from a bucket
-- s3: bucket=mybucket object=/my/desired/key.txt mode=delobj
+- name: GET an object but dont download if the file checksums match. New in 2.0
+  s3:
+    bucket: mybucket
+    object: /my/desired/key.txt
+    dest: /usr/local/myfile.txt
+    mode: get
+    overwrite: different
+
+- name: Delete an object from a bucket
+  s3:
+    bucket: mybucket
+    object: /my/desired/key.txt
+    mode: delobj
 '''
 
 import os
-import urlparse
+from ansible.module_utils.six.moves.urllib.parse import urlparse
 from ssl import SSLError
 
 try:
@@ -384,6 +449,7 @@ def main():
             prefix         = dict(default=None),
             retries        = dict(aliases=['retry'], type='int', default=0),
             s3_url         = dict(aliases=['S3_URL']),
+            rgw            = dict(default='no', type='bool'),
             src            = dict(),
         ),
     )
@@ -408,6 +474,7 @@ def main():
     prefix = module.params.get('prefix')
     retries = module.params.get('retries')
     s3_url = module.params.get('s3_url')
+    rgw = module.params.get('rgw')
     src = module.params.get('src')
 
     for acl in module.params.get('permission'):
@@ -437,6 +504,10 @@ def main():
     if not s3_url and 'S3_URL' in os.environ:
         s3_url = os.environ['S3_URL']
 
+    # rgw requires an explicit url
+    if rgw and not s3_url:
+        module.fail_json(msg='rgw flavour requires s3_url')
+
     # bucket names with .'s in them need to use the calling_format option,
     # otherwise the connection will fail. See https://github.com/boto/boto/issues/2836
     # for more details.
@@ -444,9 +515,18 @@ def main():
         aws_connect_kwargs['calling_format'] = OrdinaryCallingFormat()
 
     # Look at s3_url and tweak connection settings
-    # if connecting to Walrus or fakes3
+    # if connecting to RGW, Walrus or fakes3
     try:
-        if is_fakes3(s3_url):
+        if s3_url and rgw:
+            rgw = urlparse.urlparse(s3_url)
+            s3 = boto.connect_s3(
+                is_secure=rgw.scheme == 'https',
+                host=rgw.hostname,
+                port=rgw.port,
+                calling_format=OrdinaryCallingFormat(),
+                **aws_connect_kwargs
+            )
+        elif is_fakes3(s3_url):
             fakes3 = urlparse.urlparse(s3_url)
             s3 = S3Connection(
                 is_secure=fakes3.scheme == 'fakes3s',
@@ -660,4 +740,5 @@ def main():
 from ansible.module_utils.basic import *
 from ansible.module_utils.ec2 import *
 
-main()
+if __name__ == '__main__':
+    main()

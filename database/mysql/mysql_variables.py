@@ -22,6 +22,10 @@ You should have received a copy of the GNU General Public License
 along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: mysql_variables
@@ -44,10 +48,13 @@ extends_documentation_fragment: mysql
 '''
 EXAMPLES = '''
 # Check for sync_binlog setting
-- mysql_variables: variable=sync_binlog
+- mysql_variables:
+    variable: sync_binlog
 
 # Set read_only variable to 1
-- mysql_variables: variable=read_only value=1
+- mysql_variables:
+    variable: read_only
+    value: 1
 '''
 
 

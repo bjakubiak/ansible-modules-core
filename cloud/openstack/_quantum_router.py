@@ -26,6 +26,10 @@ try:
 except ImportError:
     HAVE_DEPS = False
 
+ANSIBLE_METADATA = {'status': ['deprecated'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: quantum_router
@@ -55,7 +59,7 @@ options:
      description:
         - The keystone url for authentication
      required: false
-     default: 'http://127.0.0.1:35357/v2.0/'
+     default: http://127.0.0.1:35357/v2.0/
    region_name:
      description:
         - Name of the region
@@ -88,12 +92,13 @@ requirements:
 '''
 
 EXAMPLES = '''
-# Creates a router for tenant admin
-- quantum_router: state=present
-                login_username=admin
-                login_password=admin
-                login_tenant_name=admin
-                name=router1"
+- name: Create a router for tenant admin
+  quantum_router:
+    state: present
+    login_username: admin
+    login_password: admin
+    login_tenant_name: admin
+    name: router1
 '''
 
 _os_keystone = None

@@ -27,6 +27,8 @@ import socket
 import sys
 import time
 
+from ansible.module_utils._text import to_native
+
 HAS_PSUTIL = False
 try:
     import psutil
@@ -34,6 +36,10 @@ try:
     # just because we can import it on Linux doesn't mean we will use it
 except ImportError:
     pass
+
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
 
 DOCUMENTATION = '''
 ---
@@ -78,28 +84,39 @@ options:
     description:
       - port number to poll
     required: false
+    default: null
   state:
     description:
       - either C(present), C(started), or C(stopped), C(absent), or C(drained)
       - When checking a port C(started) will ensure the port is open, C(stopped) will check that it is closed, C(drained) will check for active connections
       - When checking for a file or a search string C(present) or C(started) will ensure that the file or string is present before continuing, C(absent) will check that file is absent or removed
     choices: [ "present", "started", "stopped", "absent", "drained" ]
+    required: False
     default: "started"
   path:
     version_added: "1.4"
     required: false
+    default: null
     description:
       - path to a file on the filesytem that must exist before continuing
   search_regex:
     version_added: "1.4"
     required: false
+    default: null
     description:
       - Can be used to match a string in either a file or a socket connection. Defaults to a multiline regex.
   exclude_hosts:
     version_added: "1.8"
     required: false
+    default: null
     description:
       - list of hosts or IPs to ignore when looking for active TCP connections for C(drained) state
+  sleep:
+    version_added: "2.3"
+    required: false
+    default: 1
+    description:
+      - Number of seconds to sleep between checks, before 2.3 this was hardcoded to 1 second.
 notes:
   - The ability to use search_regex with a port connection was added in 1.7.
 requirements: []
@@ -112,30 +129,50 @@ author:
 EXAMPLES = '''
 
 # wait 300 seconds for port 8000 to become open on the host, don't start checking for 10 seconds
-- wait_for: port=8000 delay=10
+- wait_for:
+    port: 8000
+    delay: 10
 
 # wait 300 seconds for port 8000 of any IP to close active connections, don't start checking for 10 seconds
-- wait_for: host=0.0.0.0 port=8000 delay=10 state=drained
+- wait_for:
+    host: 0.0.0.0
+    port: 8000
+    delay: 10
+    state: drained
 
 # wait 300 seconds for port 8000 of any IP to close active connections, ignoring connections for specified hosts
-- wait_for: host=0.0.0.0 port=8000 state=drained exclude_hosts=10.2.1.2,10.2.1.3
+- wait_for:
+    host: 0.0.0.0
+    port: 8000
+    state: drained
+    exclude_hosts: 10.2.1.2,10.2.1.3
 
 # wait until the file /tmp/foo is present before continuing
-- wait_for: path=/tmp/foo
+- wait_for:
+    path: /tmp/foo
 
 # wait until the string "completed" is in the file /tmp/foo before continuing
-- wait_for: path=/tmp/foo search_regex=completed
+- wait_for:
+    path: /tmp/foo
+    search_regex: completed
 
 # wait until the lock file is removed
-- wait_for: path=/var/lock/file.lock state=absent
+- wait_for:
+    path: /var/lock/file.lock
+    state: absent
 
 # wait until the process is finished and pid was destroyed
-- wait_for: path=/proc/3466/status state=absent
+- wait_for:
+    path: /proc/3466/status
+    state: absent
 
 # wait 300 seconds for port 22 to become open and contain "OpenSSH", don't assume the inventory_hostname is resolvable
 # and don't start checking for 10 seconds
-- local_action: wait_for port=22 host="{{ ansible_ssh_host | default(inventory_hostname) }}" search_regex=OpenSSH delay=10
-
+- local_action: wait_for
+    port: 22
+    host: "{{ ansible_ssh_host | default(inventory_hostname) }}"
+    search_regex: OpenSSH
+    delay: 10
 '''
 
 class TCPConnectionInfo(object):
@@ -362,7 +399,8 @@ def main():
             path=dict(default=None, type='path'),
             search_regex=dict(default=None),
             state=dict(default='started', choices=['started', 'stopped', 'present', 'absent', 'drained']),
-            exclude_hosts=dict(default=None, type='list')
+            exclude_hosts=dict(default=None, type='list'),
+            sleep=dict(default=1, type='int')
         ),
     )
 
@@ -407,8 +445,6 @@ def main():
                 try:
                     f = open(path)
                     f.close()
-                    time.sleep(1)
-                    pass
                 except IOError:
                     break
             elif port:
@@ -416,11 +452,10 @@ def main():
                     s = _create_connection(host, port, connect_timeout)
                     s.shutdown(socket.SHUT_RDWR)
                     s.close()
-                    time.sleep(1)
                 except:
                     break
-            else:
-                time.sleep(1)
+            # Conditions not yet met, wait and try again
+            time.sleep(params['sleep'])
         else:
             elapsed = datetime.datetime.now() - start
             if port:
@@ -480,7 +515,7 @@ def main():
                             if not response:
                                 # Server shutdown
                                 break
-                            data += response
+                            data += to_native(response, errors='surrogate_or_strict')
                             if re.search(compiled_search_re, data):
                                 matched = True
                                 break
@@ -498,7 +533,7 @@ def main():
                         break
 
             # Conditions not yet met, wait and try again
-            time.sleep(1)
+            time.sleep(params['sleep'])
 
         else:   # while-else
             # Timeout expired
@@ -524,7 +559,8 @@ def main():
                     break
             except IOError:
                 pass
-            time.sleep(1)
+            # Conditions not yet met, wait and try again
+            time.sleep(params['sleep'])
         else:
             elapsed = datetime.datetime.now() - start
             module.fail_json(msg="Timeout when waiting for %s:%s to drain" % (host, port), elapsed=elapsed.seconds)

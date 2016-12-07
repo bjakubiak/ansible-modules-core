@@ -20,6 +20,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: ini_file
@@ -77,14 +81,17 @@ options:
      required: false
      default: false
      version_added: "2.1"
+  create:
+     required: false
+     choices: [ "yes", "no" ]
+     default: "yes"
+     description:
+       - If set to 'no', the module will fail if the file does not already exist.
+         By default it will create the file if it is missing.
+     version_added: "2.2"
 notes:
    - While it is possible to add an I(option) without specifying a I(value), this makes
      no sense.
-   - A section named C(default) cannot be added by the module, but if it exists, individual
-     options within the section can be updated. (This is a limitation of Python's I(ConfigParser).)
-     Either use M(template) to create a base INI file with a C([default]) section, or use
-     M(lineinfile) to add the missing line.
-requirements: [ ConfigParser ]
 author:
     - "Jan-Piet Mens (@jpmens)"
     - "Ales Nosek (@noseka1)"
@@ -92,57 +99,76 @@ author:
 
 EXAMPLES = '''
 # Ensure "fav=lemonade is in section "[drinks]" in specified file
-- ini_file: dest=/etc/conf section=drinks option=fav value=lemonade mode=0600 backup=yes
+- ini_file:
+    dest: /etc/conf
+    section: drinks
+    option: fav
+    value: lemonade
+    mode: 0600
+    backup: yes
 
-- ini_file: dest=/etc/anotherconf
-            section=drinks
-            option=temperature
-            value=cold
-            backup=yes
+- ini_file:
+    dest: /etc/anotherconf
+    section: drinks
+    option: temperature
+    value: cold
+    backup: yes
 '''
 
-import ConfigParser
-import sys
 import os
+import re
 
 # ==============================================================
 # match_opt
 
 def match_opt(option, line):
   option = re.escape(option)
-  return re.match('%s *=' % option, line) \
-    or re.match('# *%s *=' % option, line) \
-    or re.match('; *%s *=' % option, line)
+  return re.match(' *%s( |\t)*=' % option, line) \
+    or re.match('# *%s( |\t)*=' % option, line) \
+    or re.match('; *%s( |\t)*=' % option, line)
 
 # ==============================================================
 # match_active_opt
 
 def match_active_opt(option, line):
   option = re.escape(option)
-  return re.match('%s *=' % option, line)
+  return re.match(' *%s( |\t)*=' % option, line)
 
 # ==============================================================
 # do_ini
 
-def do_ini(module, filename, section=None, option=None, value=None, state='present', backup=False, no_extra_spaces=False):
+def do_ini(module, filename, section=None, option=None, value=None,
+        state='present', backup=False, no_extra_spaces=False, create=False):
 
+    diff = {'before': '',
+            'after': '',
+            'before_header': '%s (content)' % filename,
+            'after_header': '%s (content)' % filename}
 
     if not os.path.exists(filename):
-      try:
-        open(filename,'w').close()
-      except:
-        module.fail_json(msg="Destination file %s not writable" % filename)
-    ini_file = open(filename, 'r')
-    try:
-        ini_lines = ini_file.readlines()
-        # append a fake section line to simplify the logic
-        ini_lines.append('[')
-    finally:
-        ini_file.close()
+        if not create:
+            module.fail_json(rc=257, msg='Destination %s does not exist !' % filename)
+        destpath = os.path.dirname(filename)
+        if not os.path.exists(destpath) and not module.check_mode:
+            os.makedirs(destpath)
+        ini_lines = []
+    else:
+        ini_file = open(filename, 'r')
+        try:
+            ini_lines = ini_file.readlines()
+        finally:
+            ini_file.close()
+
+    if module._diff:
+        diff['before'] = ''.join(ini_lines)
+
+    # append a fake section line to simplify the logic
+    ini_lines.append('[')
 
     within_section = not section
     section_start = 0
     changed = False
+    msg = 'OK'
     if no_extra_spaces:
         assignment_format = '%s=%s\n'
     else:
@@ -156,11 +182,17 @@ def do_ini(module, filename, section=None, option=None, value=None, state='prese
             if within_section:
                 if state == 'present':
                     # insert missing option line at the end of the section
-                    ini_lines.insert(index, assignment_format % (option, value))
-                    changed = True
+                    for i in range(index, 0, -1):
+                        # search backwards for previous non-blank or non-comment line
+                        if not re.match(r'^[ \t]*([#;].*)?$', ini_lines[i - 1]):
+                            ini_lines.insert(i, assignment_format % (option, value))
+                            msg = 'option added'
+                            changed = True
+                            break
                 elif state == 'absent' and not option:
                     # remove the entire section
                     del ini_lines[section_start:index]
+                    msg = 'section removed'
                     changed = True
                 break
         else:
@@ -170,9 +202,11 @@ def do_ini(module, filename, section=None, option=None, value=None, state='prese
                     if match_opt(option, line):
                         newline = assignment_format % (option, value)
                         changed = ini_lines[index] != newline
+                        if changed:
+                            msg = 'option changed'
                         ini_lines[index] = newline
                         if changed:
-                            # remove all possible option occurences from the rest of the section
+                            # remove all possible option occurrences from the rest of the section
                             index = index + 1
                             while index < len(ini_lines):
                                 line = ini_lines[index]
@@ -183,11 +217,12 @@ def do_ini(module, filename, section=None, option=None, value=None, state='prese
                                 else:
                                     index = index + 1
                         break
-                else:
-                    # comment out the existing option line
+                elif state == 'absent':
+                    # delete the existing line
                     if match_active_opt(option, line):
-                        ini_lines[index] = '#%s' % ini_lines[index]
+                        del ini_lines[index]
                         changed = True
+                        msg = 'option changed'
                         break
 
     # remove the fake section line
@@ -197,18 +232,22 @@ def do_ini(module, filename, section=None, option=None, value=None, state='prese
         ini_lines.append('[%s]\n' % section)
         ini_lines.append(assignment_format % (option, value))
         changed = True
+        msg = 'section and option added'
 
+    if module._diff:
+        diff['after'] = ''.join(ini_lines)
 
+    backup_file = None
     if changed and not module.check_mode:
         if backup:
-            module.backup_local(filename)
+            backup_file = module.backup_local(filename)
         ini_file = open(filename, 'w')
         try:
             ini_file.writelines(ini_lines)
         finally:
             ini_file.close()
 
-    return changed
+    return (changed, backup_file, diff, msg)
 
 # ==============================================================
 # main
@@ -223,13 +262,12 @@ def main():
             value = dict(required=False),
             backup = dict(default='no', type='bool'),
             state = dict(default='present', choices=['present', 'absent']),
-            no_extra_spaces = dict(required=False, default=False, type='bool')
+            no_extra_spaces = dict(required=False, default=False, type='bool'),
+            create=dict(default=True, type='bool')
         ),
         add_file_common_args = True,
         supports_check_mode = True
     )
-
-    info = dict()
 
     dest = os.path.expanduser(module.params['dest'])
     section = module.params['section']
@@ -238,14 +276,20 @@ def main():
     state = module.params['state']
     backup = module.params['backup']
     no_extra_spaces = module.params['no_extra_spaces']
+    create = module.params['create']
 
-    changed = do_ini(module, dest, section, option, value, state, backup, no_extra_spaces)
+    (changed,backup_file,diff,msg) = do_ini(module, dest, section, option, value, state, backup, no_extra_spaces, create)
 
-    file_args = module.load_file_common_arguments(module.params)
-    changed = module.set_fs_attributes_if_different(file_args, changed)
+    if not module.check_mode and os.path.exists(dest):
+        file_args = module.load_file_common_arguments(module.params)
+        changed = module.set_fs_attributes_if_different(file_args, changed)
+
+    results = { 'changed': changed, 'msg': msg, 'dest': dest, 'diff': diff }
+    if backup_file is not None:
+        results['backup_file'] = backup_file
 
     # Mission complete
-    module.exit_json(dest=dest, changed=changed, msg="OK")
+    module.exit_json(**results)
 
 # import module snippets
 from ansible.module_utils.basic import *

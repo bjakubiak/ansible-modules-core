@@ -16,6 +16,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = """
 ---
 module: junos_command
@@ -26,7 +30,7 @@ description:
   - Network devices running the Junos operating system provide a command
     driven interface both over CLI and RPC.  This module provides an
     interface to execute commands using these functions and return the
-    results to the Ansible playbook.  In addition, the M(junos_command)
+    results to the Ansible playbook.  In addition, this
     module can specify a set of conditionals to be evaluated against the
     returned output, only returning control to the playbook once the
     entire set of conditionals has been met.
@@ -34,9 +38,11 @@ extends_documentation_fragment: junos
 options:
   commands:
     description:
-      - An ordered set of CLI commands to be executed on the remote
-        device.  The output from the commands is then returned to
-        the playbook in the task results.
+      - The C(commands) to send to the remote device over the Netconf
+        transport.  The resulting output from the command
+        is returned.  If the I(wait_for) argument is provided, the
+        module is not returned until the condition is satisfied or
+        the number of I(retries) has been exceeded.
     required: false
     default: null
   rpcs:
@@ -46,22 +52,35 @@ options:
         is return to the playbook via the modules results dictionary.
     required: false
     default: null
-  waitfor:
+  wait_for:
     description:
       - Specifies what to evaluate from the output of the command
         and what conditionals to apply.  This argument will cause
-        the task to wait for a particular conditional or set of
-        considitonals to be true before moving forward.   If the
-        conditional is not true by the configured retries, the
-        task fails.  See examples.
+        the task to wait for a particular conditional to be true
+        before moving forward.   If the conditional is not true
+        by the configured retries, the task fails.  See examples.
     required: false
     default: null
+    aliases: ['waitfor']
+    version_added: "2.2"
+  match:
+    description:
+      - The I(match) argument is used in conjunction with the
+        I(wait_for) argument to specify the match policy.  Valid
+        values are C(all) or C(any).  If the value is set to C(all)
+        then all conditionals in the I(wait_for) must be satisfied.  If
+        the value is set to C(any) then only one of the values must be
+        satisfied.
+    required: false
+    default: all
+    choices: ['any', 'all']
+    version_added: "2.2"
   retries:
     description:
       - Specifies the number of retries a command should by tried
         before it is considered failed.  The command is run on the
-        target device every retry and evaluated against the waitfor
-        conditionals
+        target device every retry and evaluated against the I(waitfor)
+        conditionals.
     required: false
     default: 10
   interval:
@@ -88,12 +107,18 @@ notes:
 """
 
 EXAMPLES = """
-# the required set of connection arguments have been purposely left off
-# the examples for brevity
+# Note: examples below use the following provider dict to handle
+#       transport and authentication to the node.
+vars:
+  netconf:
+    host: "{{ inventory_hostname }}"
+    username: ansible
+    password: Ansible
 
 - name: run a set of commands
   junos_command:
     commands: ['show version', 'show ip route']
+    provider: "{{ netconf }}"
 
 - name: run a command with a conditional applied to the second command
   junos_command:
@@ -102,12 +127,14 @@ EXAMPLES = """
       - show interfaces fxp0
     waitfor:
       - "result[1].interface-information.physical-interface.name eq fxp0"
+    provider: "{{ netconf }}"
 
 - name: collect interface information using rpc
   junos_command:
     rpcs:
       - "get_interface_information interface=em0 media=True"
       - "get_interface_information interface=fxp0 media=True"
+    provider: "{{ netconf }}"
 """
 
 RETURN = """
@@ -123,63 +150,66 @@ stdout_lines:
   type: list
   sample: [['...', '...'], ['...', '...']]
 
-xml:
-  description: The raw XML reply from the device
-  returned: when format is xml
-  type: list
-  sample: [['...', '...'], ['...', '...']]
-
 failed_conditionals:
   description: the conditionals that failed
-  retured: failed
+  returned: failed
   type: list
   sample: ['...', '...']
 """
-import shlex
 
-def split(value):
-    lex = shlex.shlex(value)
-    lex.quotes = '"'
-    lex.whitespace_split = True
-    lex.commenters = ''
-    return list(lex)
+import ansible.module_utils.junos
+from ansible.module_utils.basic import get_exception
+from ansible.module_utils.network import NetworkModule, NetworkError
+from ansible.module_utils.netcli import CommandRunner
+from ansible.module_utils.netcli import AddCommandError, FailedConditionsError
+from ansible.module_utils.netcli import FailedConditionalError, AddConditionError
+from ansible.module_utils.junos import xml_to_json
+from ansible.module_utils.six import string_types
 
-def rpc_args(args):
-    kwargs = dict()
-    args = split(args)
-    name = args.pop(0)
-    for arg in args:
-        key, value = arg.split('=')
-        if str(value).upper() in ['TRUE', 'FALSE']:
-            kwargs[key] = bool(value)
-        elif re.match(r'\d+', value):
-            kwargs[key] = int(value)
-        else:
-            kwargs[key] = str(value)
-    return (name, kwargs)
+VALID_KEYS = {
+    'cli': frozenset(['command', 'output', 'prompt', 'response']),
+    'rpc': frozenset(['command', 'output'])
+}
 
-def parse_rpcs(rpcs):
-    parsed = list()
-    for rpc in (rpcs or list()):
-        parsed.append(rpc_args(rpc))
-    return parsed
 
-def run_rpcs(module, items, format):
-    response = list()
-    for name, kwargs in items:
-        kwargs['format'] = format
-        result = module.connection.rpc(name, **kwargs)
-        if format == 'text':
-            response.append(result.text)
-        else:
-            response.append(result)
-    return response
-
-def iterlines(stdout):
+def to_lines(stdout):
     for item in stdout:
-        if isinstance(item, basestring):
+        if isinstance(item, string_types):
             item = str(item).split('\n')
         yield item
+
+def parse(module, command_type):
+    if command_type == 'cli':
+        items = module.params['commands']
+    elif command_type == 'rpc':
+        items = module.params['rpcs']
+
+    parsed = list()
+    for item in (items or list()):
+        if isinstance(item, string_types):
+            item = dict(command=item, output=None)
+        elif 'command' not in item:
+            module.fail_json(msg='command keyword argument is required')
+        elif item.get('output') not in [None, 'text', 'xml']:
+            module.fail_json(msg='invalid output specified for command'
+                                 'Supported values are `text` or `xml`')
+        elif not set(item.keys()).issubset(VALID_KEYS[command_type]):
+            module.fail_json(msg='unknown command keyword specified.  Valid '
+                                 'values are %s' % ', '.join(VALID_KEYS[command_type]))
+
+        if not item['output']:
+            item['output'] = module.params['display']
+
+        item['command_type'] = command_type
+
+        # show configuration [options] will return as text
+        if item['command'].startswith('show configuration'):
+            item['output'] = 'text'
+
+        parsed.append(item)
+
+    return parsed
+
 
 def main():
     """main entry point for Ansible module
@@ -188,76 +218,87 @@ def main():
     spec = dict(
         commands=dict(type='list'),
         rpcs=dict(type='list'),
-        format=dict(default='xml', choices=['text', 'xml']),
-        waitfor=dict(type='list'),
+
+        display=dict(default='xml', choices=['text', 'xml'],
+                     aliases=['format', 'output']),
+
+        wait_for=dict(type='list', aliases=['waitfor']),
+        match=dict(default='all', choices=['all', 'any']),
+
         retries=dict(default=10, type='int'),
         interval=dict(default=1, type='int'),
+
         transport=dict(default='netconf', choices=['netconf'])
     )
 
     mutually_exclusive = [('commands', 'rpcs')]
 
-    module = get_module(argument_spec=spec,
-                        mutually_exclusive=mutually_exclusive,
-                        supports_check_mode=True)
+    module = NetworkModule(argument_spec=spec,
+                           mutually_exclusive=mutually_exclusive,
+                           supports_check_mode=True)
 
+    commands = list()
+    for key in VALID_KEYS.keys():
+        commands.extend(list(parse(module, key)))
 
-    commands = module.params['commands']
-    rpcs = parse_rpcs(module.params['rpcs'])
+    conditionals = module.params['wait_for'] or list()
 
-    encoding = module.params['format']
-    retries = module.params['retries']
-    interval = module.params['interval']
+    warnings = list()
 
+    runner = CommandRunner(module)
+
+    for cmd in commands:
+        if module.check_mode and not cmd['command'].startswith('show'):
+            warnings.append('only show commands are supported when using '
+                            'check mode, not executing `%s`' % cmd['command'])
+        else:
+            if cmd['command'].startswith('co'):
+                module.fail_json(msg='junos_command does not support running '
+                                     'config mode commands.  Please use '
+                                     'junos_config instead')
+            try:
+                runner.add_command(**cmd)
+            except AddCommandError:
+                exc = get_exception()
+                warnings.append('duplicate command detected: %s' % cmd)
 
     try:
-        queue = set()
-        for entry in (module.params['waitfor'] or list()):
-            queue.add(Conditional(entry))
-    except AttributeError:
+        for item in conditionals:
+            runner.add_conditional(item)
+    except (ValueError, AddConditionError):
         exc = get_exception()
-        module.fail_json(msg=exc.message)
+        module.fail_json(msg=str(exc), condition=exc.condition)
 
-    result = dict(changed=False)
+    runner.retries = module.params['retries']
+    runner.interval = module.params['interval']
+    runner.match = module.params['match']
 
-    while retries > 0:
-        if commands:
-            response = module.run_commands(commands, format=encoding)
-        else:
-            response = run_rpcs(module, rpcs, format=encoding)
+    try:
+        runner.run()
+    except FailedConditionsError:
+        exc = get_exception()
+        module.fail_json(msg=str(exc), failed_conditions=exc.failed_conditions)
+    except FailedConditionalError:
+        exc = get_exception()
+        module.fail_json(msg=str(exc), failed_conditional=exc.failed_conditional)
+    except NetworkError:
+        exc = get_exception()
+        module.fail_json(msg=str(exc))
 
-        result['stdout'] = response
-        xmlout = list()
+    result = dict(changed=False, stdout=list())
 
-        for index in range(0, len(response)):
-            if encoding == 'xml':
-                xmlout.append(xml_to_string(response[index]))
-                response[index] = xml_to_json(response[index])
+    for cmd in commands:
+        try:
+            output = runner.get_command(cmd['command'], cmd.get('output'))
+        except ValueError:
+            output = 'command not executed due to check_mode, see warnings'
+        result['stdout'].append(output)
 
-        for item in list(queue):
-            if item(response):
-                queue.remove(item)
+    result['warnings'] = warnings
+    result['stdout_lines'] = list(to_lines(result['stdout']))
 
-        if not queue:
-            break
-
-        time.sleep(interval)
-        retries -= 1
-    else:
-        failed_conditions = [item.raw for item in queue]
-        module.fail_json(msg='timeout waiting for value', failed_conditions=failed_conditions)
-
-    if xmlout:
-        result['xml'] = xmlout
-
-    result['stdout_lines'] = list(iterlines(result['stdout']))
     module.exit_json(**result)
 
 
-from ansible.module_utils.basic import *
-from ansible.module_utils.netcfg import *
-from ansible.module_utils.junos import *
-
 if __name__ == '__main__':
     main()
-

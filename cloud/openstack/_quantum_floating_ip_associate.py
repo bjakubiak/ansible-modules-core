@@ -28,6 +28,10 @@ try:
 except ImportError:
     HAVE_DEPS = False
 
+ANSIBLE_METADATA = {'status': ['deprecated'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: quantum_floating_ip_associate
@@ -57,7 +61,7 @@ options:
      description:
         - the keystone url for authentication
      required: false
-     default: 'http://127.0.0.1:35357/v2.0/'
+     default: http://127.0.0.1:35357/v2.0/
    region_name:
      description:
         - name of the region
@@ -86,14 +90,14 @@ requirements:
 '''
 
 EXAMPLES = '''
-# Associate a specific floating IP with an Instance
-- quantum_floating_ip_associate:
-           state=present
-           login_username=admin
-           login_password=admin
-           login_tenant_name=admin
-           ip_address=1.1.1.1
-           instance_name=vm1
+- name: Associate a specific floating IP with an Instance
+  quantum_floating_ip_associate:
+    state: present
+    login_username: admin
+    login_password: admin
+    login_tenant_name: admin
+    ip_address: 1.1.1.1
+    instance_name: vm1
 '''
 
 def _get_ksclient(module, kwargs):

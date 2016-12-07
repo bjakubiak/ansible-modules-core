@@ -36,6 +36,10 @@ try:
 except:
     transaction_helpers = False
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: yum
@@ -156,31 +160,50 @@ author:
 
 EXAMPLES = '''
 - name: install the latest version of Apache
-  yum: name=httpd state=latest
+  yum:
+    name: httpd
+    state: latest
 
 - name: remove the Apache package
-  yum: name=httpd state=absent
+  yum:
+    name: httpd
+    state: absent
 
 - name: install the latest version of Apache from the testing repo
-  yum: name=httpd enablerepo=testing state=present
+  yum:
+    name: httpd
+    enablerepo: testing
+    state: present
 
 - name: install one specific version of Apache
-  yum: name=httpd-2.2.29-1.4.amzn1 state=present
+  yum:
+    name: httpd-2.2.29-1.4.amzn1
+    state: present
 
 - name: upgrade all packages
-  yum: name=* state=latest
+  yum:
+    name: '*'
+    state: latest
 
 - name: install the nginx rpm from a remote repo
-  yum: name=http://nginx.org/packages/centos/6/noarch/RPMS/nginx-release-centos-6-0.el6.ngx.noarch.rpm state=present
+  yum:
+    name: http://nginx.org/packages/centos/6/noarch/RPMS/nginx-release-centos-6-0.el6.ngx.noarch.rpm
+    state: present
 
 - name: install nginx rpm from a local file
-  yum: name=/usr/local/src/nginx-release-centos-6-0.el6.ngx.noarch.rpm state=present
+  yum:
+    name: /usr/local/src/nginx-release-centos-6-0.el6.ngx.noarch.rpm
+    state: present
 
 - name: install the 'Development tools' package group
-  yum: name="@Development tools" state=present
+  yum:
+    name: "@Development tools"
+    state: present
 
 - name: install the 'Gnome desktop' environment group
-  yum: name="@^gnome-desktop-environment" state=present
+  yum:
+    name: "@^gnome-desktop-environment"
+    state: present
 '''
 
 # 64k.  Number of bytes to read at a time when manually downloading pkgs via a url
@@ -218,6 +241,27 @@ def ensure_yum_utils(module):
         repoquerybin = module.get_bin_path('repoquery', required=False)
 
     return repoquerybin
+
+def fetch_rpm_from_url(spec, module=None):
+    # download package so that we can query it
+    tempdir = tempfile.mkdtemp()
+    package = os.path.join(tempdir, str(spec.rsplit('/', 1)[1]))
+    try:
+        rsp, info = fetch_url(module, spec)
+        if not rsp:
+            module.fail_json(msg="Failure downloading %s, %s" % (spec, info['msg']))
+        f = open(package, 'w')
+        data = rsp.read(BUFSIZE)
+        while data:
+            f.write(data)
+            data = rsp.read(BUFSIZE)
+        f.close()
+    except Exception:
+        e = get_exception()
+        shutil.rmtree(tempdir)
+        if module:
+            module.fail_json(msg="Failure downloading %s, %s" % (spec, e))
+    return package
 
 def po_to_nevra(po):
 
@@ -384,6 +428,13 @@ def what_provides(module, repoq, req_spec, conf_file,  qf=def_qf, en_repos=None,
     if dis_repos is None:
         dis_repos = []
 
+    if req_spec.endswith('.rpm') and '://' not in req_spec:
+        return req_spec
+
+    elif '://' in req_spec:
+        local_path = fetch_rpm_from_url(req_spec, module=module)
+        return local_path
+
     if not repoq:
 
         pkgs = []
@@ -481,24 +532,11 @@ def local_nvra(module, path):
     finally:
         os.close(fd)
 
-    return '%s-%s-%s.%s' % (header[rpm.RPMTAG_NAME], 
+    return '%s-%s-%s.%s' % (header[rpm.RPMTAG_NAME],
                             header[rpm.RPMTAG_VERSION],
                             header[rpm.RPMTAG_RELEASE],
                             header[rpm.RPMTAG_ARCH])
-    
-def local_name(module, path):
-    """return package name of a local rpm passed in"""
 
-    ts = rpm.TransactionSet()
-    ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES)
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        header = ts.hdrFromFdno(fd)
-    finally:
-        os.close(fd)
-
-    return header[rpm.RPMTAG_NAME]
-    
 def pkg_to_dict(pkgstr):
 
     if pkgstr.strip():
@@ -570,12 +608,15 @@ def install(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
         if spec.endswith('.rpm') and '://' not in spec:
             # get the pkg name-v-r.arch
             if not os.path.exists(spec):
-                res['msg'] += "No Package file matching '%s' found on system" % spec
+                res['msg'] += "No RPM file matching '%s' found on system" % spec
+                res['results'].append("No RPM file matching '%s' found on system" % spec)
+                res['rc'] = 127 # Ensure the task fails in with-loop
                 module.fail_json(**res)
 
-            pkg_name = local_name(module, spec)
+            nvra = local_nvra(module, spec)
+
             # look for them in the rpmdb
-            if is_installed(module, repoq, pkg_name, conf_file, en_repos=en_repos, dis_repos=dis_repos):
+            if is_installed(module, repoq, nvra, conf_file, en_repos=en_repos, dis_repos=dis_repos):
                 # if they are there, skip it
                 continue
             pkg = spec
@@ -583,22 +624,9 @@ def install(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
         # URL
         elif '://' in spec:
             # download package so that we can check if it's already installed
-            package = os.path.join(tempdir, str(spec.rsplit('/', 1)[1]))
-            try:
-                rsp, info = fetch_url(module, spec)
-                f = open(package, 'w')
-                data = rsp.read(BUFSIZE)
-                while data:
-                    f.write(data)
-                    data = rsp.read(BUFSIZE)
-                f.close()
-            except Exception:
-                e = get_exception()
-                shutil.rmtree(tempdir)
-                module.fail_json(msg="Failure downloading %s, %s" % (spec, e))
-
-            pkg_name = local_name(module, package)
-            if is_installed(module, repoq, pkg_name, conf_file, en_repos=en_repos, dis_repos=dis_repos):
+            package = fetch_rpm_from_url(spec, module=module)
+            nvra = local_nvra(module, package)
+            if is_installed(module, repoq, nvra, conf_file, en_repos=en_repos, dis_repos=dis_repos):
                 # if it's there, skip it
                 continue
             pkg = package
@@ -618,11 +646,13 @@ def install(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
                 if installed_pkgs:
                     res['results'].append('%s providing %s is already installed' % (installed_pkgs[0], spec))
                     continue
-            
+
             # look up what pkgs provide this
             pkglist = what_provides(module, repoq, spec, conf_file, en_repos=en_repos, dis_repos=dis_repos)
             if not pkglist:
-                res['msg'] += "No Package matching '%s' found available, installed or updated" % spec
+                res['msg'] += "No package matching '%s' found available, installed or updated" % spec
+                res['results'].append("No package matching '%s' found available, installed or updated" % spec)
+                res['rc'] = 126 # Ensure the task fails in with-loop
                 module.fail_json(**res)
 
             # if any of the packages are involved in a transaction, fail now
@@ -630,6 +660,7 @@ def install(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
             conflicts = transaction_exists(pkglist)
             if len(conflicts) > 0:
                 res['msg'] += "The following packages have pending transactions: %s" % ", ".join(conflicts)
+                res['rc'] = 125 # Ensure the task fails in with-loop
                 module.fail_json(**res)
 
             # if any of them are installed
@@ -684,8 +715,7 @@ def install(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
             for spec in items:
                 # Fail on invalid urls:
                 if ('://' in spec and ('No package %s available.' % spec in out or 'Cannot open: %s. Skipping.' % spec in err)):
-                    err = 'Package at %s could not be installed' % spec
-                    module.fail_json(changed=False,msg=err,rc=1)
+                    module.fail_json(msg='Package at %s could not be installed' % spec, rc=1, changed=False)
         if (rc != 0 and 'Nothing to do' in err) or 'Nothing to do' in out:
             # avoid failing in the 'Nothing To Do' case
             # this may happen with an URL spec.
@@ -757,7 +787,7 @@ def remove(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
         # of the process
 
         # at this point we should check to see if the pkg is no longer present
-        
+
         for pkg in pkgs:
             if not pkg.startswith('@'): # we can't sensibly check for a group being uninstalled reliably
                 # look to see if the pkg shows up from is_installed. If it doesn't
@@ -795,6 +825,8 @@ def latest(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
         res['results'].append('Nothing to do here, all packages are up to date')
         return res
     elif rc == 100:
+        # remove incorrect new lines in longer columns in output from yum check-update
+        out=re.sub('\n\W+', ' ', out)
         available_updates = out.split('\n')
         # build update dictionary
         for line in available_updates:
@@ -823,6 +855,7 @@ def latest(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
             # some guess work involved with groups. update @<group> will install the group if missing
             if spec.startswith('@'):
                 pkgs['update'].append(spec)
+                will_update.add(spec)
                 continue
             # dep/pkgname  - find it
             else:
@@ -833,7 +866,9 @@ def latest(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
             pkglist = what_provides(module, repoq, spec, conf_file, en_repos=en_repos, dis_repos=dis_repos)
             # FIXME..? may not be desirable to throw an exception here if a single package is missing
             if not pkglist:
-                res['msg'] += "No Package matching '%s' found available, installed or updated" % spec
+                res['msg'] += "No package matching '%s' found available, installed or updated" % spec
+                res['results'].append("No package matching '%s' found available, installed or updated" % spec)
+                res['rc'] = 126 # Ensure the task fails in with-loop
                 module.fail_json(**res)
 
             nothing_to_do = True
@@ -846,7 +881,7 @@ def latest(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
                 # or virtual provides (like "python-*" or "smtp-daemon") while
                 # updates contains name only.
                 this_name_only = '-'.join(this.split('-')[:-2])
-                if spec in pkgs['update'] and this_name_only in updates.keys():
+                if spec in pkgs['update'] and this_name_only in updates:
                     nothing_to_do = False
                     will_update.add(spec)
                     # Massage the updates list
@@ -865,6 +900,8 @@ def latest(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
             conflicts = transaction_exists(pkglist)
             if len(conflicts) > 0:
                 res['msg'] += "The following packages have pending transactions: %s" % ", ".join(conflicts)
+                res['results'].append("The following packages have pending transactions: %s" % ", ".join(conflicts))
+                res['rc'] = 128 # Ensure the task fails in with-loop
                 module.fail_json(**res)
 
     # check_mode output
@@ -895,14 +932,16 @@ def latest(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
         if len(pkgs['install']) > 0:    # install missing
             cmd = yum_basecmd + ['install'] + pkgs['install']
             rc, out, err = module.run_command(cmd)
-            res['changed'] = True
+            if not out.strip().lower().endswith("no packages marked for update"):
+                res['changed'] = True
         else:
             rc, out, err = [0, '', '']
 
         if len(will_update) > 0:     # update present
             cmd = yum_basecmd + ['update'] + pkgs['update']
             rc2, out2, err2 = module.run_command(cmd)
-            res['changed'] = True
+            if not out2.strip().lower().endswith("no packages marked for update"):
+                res['changed'] = True
         else:
             rc2, out2, err2 = [0, '', '']
 
@@ -923,7 +962,14 @@ def latest(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
 def ensure(module, state, pkgs, conf_file, enablerepo, disablerepo,
            disable_gpg_check, exclude, repoq):
 
-    yumbin = module.get_bin_path('yum')
+    # fedora will redirect yum to dnf, which has incompatibilities
+    # with how this module expects yum to operate. If yum-deprecated
+    # is available, use that instead to emulate the old behaviors.
+    if module.get_bin_path('yum-deprecated'):
+        yumbin = module.get_bin_path('yum-deprecated')
+    else:
+        yumbin = module.get_bin_path('yum')
+
     # need debug level 2 to get 'Nothing to do' for groupinstall.
     yum_basecmd = [yumbin, '-d', '2', '-y']
 
@@ -985,7 +1031,7 @@ def ensure(module, state, pkgs, conf_file, enablerepo, disablerepo,
     else:
         # should be caught by AnsibleModule argument_spec
         module.fail_json(msg="we should never get here unless this all"
-                " failed", changed=False, results='', errors='unepected state')
+                " failed", changed=False, results='', errors='unexpected state')
 
     return res
 

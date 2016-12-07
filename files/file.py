@@ -18,11 +18,9 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-import errno
-import shutil
-import stat
-import grp
-import pwd
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
 
 DOCUMENTATION = '''
 ---
@@ -37,7 +35,7 @@ description:
 notes:
     - See also M(copy), M(template), M(assemble)
 requirements: [ ]
-author: 
+author:
     - "Ansible Core Team"
     - "Michael DeHaan"
 options:
@@ -55,6 +53,7 @@ options:
         or M(template) module if you want that behavior.  If C(link), the symbolic
         link will be created or changed. Use C(hard) for hardlinks. If C(absent),
         directories will be recursively deleted, and files or symlinks will be unlinked.
+        Note that M(file) will not fail if the C(path) does not exist as the state did not change.
         If C(touch) (new in 1.4), an empty file will be created if the C(path) does not
         exist, while an existing file or directory will receive updated file access and
         modification times (similar to the way `touch` works from the command line).
@@ -93,34 +92,65 @@ options:
 
 EXAMPLES = '''
 # change file ownership, group and mode. When specifying mode using octal numbers, first digit should always be 0.
-- file: path=/etc/foo.conf owner=foo group=foo mode=0644
-- file: src=/file/to/link/to dest=/path/to/symlink owner=foo group=foo state=link
-- file: src=/tmp/{{ item.src }} dest={{ item.dest }} state=link
+- file:
+    path: /etc/foo.conf
+    owner: foo
+    group: foo
+    mode: 0644
+- file:
+    src: /file/to/link/to
+    dest: /path/to/symlink
+    owner: foo
+    group: foo
+    state: link
+- file:
+    src: '/tmp/{{ item.src }}'
+    dest: '{{ item.dest }}'
+    state: link
   with_items:
     - { src: 'x', dest: 'y' }
     - { src: 'z', dest: 'k' }
 
 # touch a file, using symbolic modes to set the permissions (equivalent to 0644)
-- file: path=/etc/foo.conf state=touch mode="u=rw,g=r,o=r"
+- file:
+    path: /etc/foo.conf
+    state: touch
+    mode: "u=rw,g=r,o=r"
 
 # touch the same file, but add/remove some permissions
-- file: path=/etc/foo.conf state=touch mode="u+rw,g-wx,o-rwx"
+- file:
+    path: /etc/foo.conf
+    state: touch
+    mode: "u+rw,g-wx,o-rwx"
 
 # create a directory if it doesn't exist
-- file: path=/etc/some_directory state=directory mode=0755
-
+- file:
+    path: /etc/some_directory
+    state: directory
+    mode: 0755
 '''
 
+import errno
+import os
+import shutil
+import time
 
-def get_state(path):
+# import module snippets
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.pycompat24 import get_exception
+from ansible.module_utils.six import b
+from ansible.module_utils._text import to_bytes, to_native
+
+
+def get_state(b_path):
     ''' Find out current state '''
 
-    if os.path.lexists(path):
-        if os.path.islink(path):
+    if os.path.lexists(b_path):
+        if os.path.islink(b_path):
             return 'link'
-        elif os.path.isdir(path):
+        elif os.path.isdir(b_path):
             return 'directory'
-        elif os.stat(path).st_nlink > 1:
+        elif os.stat(b_path).st_nlink > 1:
             return 'hard'
         else:
             # could be many other things, but defaulting to file
@@ -128,70 +158,73 @@ def get_state(path):
 
     return 'absent'
 
-def recursive_set_attributes(module, path, follow, file_args):
+
+def recursive_set_attributes(module, b_path, follow, file_args):
     changed = False
-    for root, dirs, files in os.walk(path):
-        for fsobj in dirs + files:
-            fsname = os.path.join(root, fsobj)
-            if not os.path.islink(fsname):
+    for b_root, b_dirs, b_files in os.walk(b_path):
+        for b_fsobj in b_dirs + b_files:
+            b_fsname = os.path.join(b_root, b_fsobj)
+            if not os.path.islink(b_fsname):
                 tmp_file_args = file_args.copy()
-                tmp_file_args['path']=fsname
+                tmp_file_args['path'] = to_native(b_fsname, errors='surrogate_or_strict')
                 changed |= module.set_fs_attributes_if_different(tmp_file_args, changed)
             else:
                 tmp_file_args = file_args.copy()
-                tmp_file_args['path']=fsname
+                tmp_file_args['path'] = to_native(b_fsname, errors='surrogate_or_strict')
                 changed |= module.set_fs_attributes_if_different(tmp_file_args, changed)
                 if follow:
-                    fsname = os.path.join(root, os.readlink(fsname))
-                    if os.path.isdir(fsname):
-                        changed |= recursive_set_attributes(module, fsname, follow, file_args)
+                    b_fsname = os.path.join(b_root, os.readlink(b_fsname))
+                    if os.path.isdir(b_fsname):
+                        changed |= recursive_set_attributes(module, b_fsname, follow, file_args)
                     tmp_file_args = file_args.copy()
-                    tmp_file_args['path']=fsname
+                    tmp_file_args['path'] = to_native(b_fsname, errors='surrogate_or_strict')
                     changed |= module.set_fs_attributes_if_different(tmp_file_args, changed)
     return changed
+
 
 def main():
 
     module = AnsibleModule(
-        argument_spec = dict(
-            state = dict(choices=['file','directory','link','hard','touch','absent'], default=None),
-            path  = dict(aliases=['dest', 'name'], required=True),
-            original_basename = dict(required=False), # Internal use only, for recursive ops
-            recurse  = dict(default=False, type='bool'),
-            force = dict(required=False, default=False, type='bool'),
-            diff_peek = dict(default=None), # Internal use only, for internal checks in the action plugins
-            validate = dict(required=False, default=None), # Internal use only, for template and copy
-            src = dict(required=False, default=None),
+        argument_spec=dict(
+            state=dict(choices=['file', 'directory', 'link', 'hard', 'touch', 'absent'], default=None),
+            path=dict(aliases=['dest', 'name'], required=True, type='path'),
+            original_basename=dict(required=False),  # Internal use only, for recursive ops
+            recurse=dict(default=False, type='bool'),
+            force=dict(required=False, default=False, type='bool'),
+            diff_peek=dict(default=None),  # Internal use only, for internal checks in the action plugins
+            validate=dict(required=False, default=None),  # Internal use only, for template and copy
+            src=dict(required=False, default=None, type='path'),
         ),
         add_file_common_args=True,
         supports_check_mode=True
     )
 
     params = module.params
-    state  = params['state']
+    state = params['state']
     force = params['force']
     diff_peek = params['diff_peek']
     src = params['src']
+    b_src = to_bytes(src, errors='surrogate_or_strict')
     follow = params['follow']
 
     # modify source as we later reload and pass, specially relevant when used by other modules.
-    params['path'] = path = os.path.expanduser(params['path'])
+    path = params['path']
+    b_path = to_bytes(path, errors='surrogate_or_strict')
 
     # short-circuit for diff_peek
     if diff_peek is not None:
         appears_binary = False
         try:
-            f = open(path)
-            b = f.read(8192)
+            f = open(b_path, 'rb')
+            head = f.read(8192)
             f.close()
-            if "\x00" in b:
+            if b("\x00") in head:
                 appears_binary = True
         except:
             pass
         module.exit_json(path=path, changed=False, appears_binary=appears_binary)
 
-    prev_state = get_state(path)
-
+    prev_state = get_state(b_path)
 
     # state should default to file, but since that creates many conflicts,
     # default to 'current' when it exists.
@@ -203,18 +236,17 @@ def main():
 
     # source is both the source of a symlink or an informational passing of the src for a template module
     # or copy module, even if this module never uses it, it is needed to key off some things
-    if src is not None:
-        src = os.path.expanduser(src)
-    else:
-        if state in ['link','hard']:
+    if src is None:
+        if state in ('link', 'hard'):
             if follow and state == 'link':
                 # use the current target of the link as the source
-                src = os.path.realpath(path)
+                src = to_native(os.path.realpath(b_path), errors='strict')
+                b_src = to_bytes(os.path.realpath(b_path), errors='strict')
             else:
                 module.fail_json(msg='src and dest are required for creating links')
 
     # original_basename is used by other modules that depend on file.
-    if os.path.isdir(path) and state not in ["link", "absent"]:
+    if os.path.isdir(b_path) and state not in ("link", "absent"):
         basename = None
         if params['original_basename']:
             basename = params['original_basename']
@@ -222,6 +254,7 @@ def main():
             basename = os.path.basename(src)
         if basename:
             params['path'] = path = os.path.join(path, basename)
+            b_path = to_bytes(path, errors='surrogate_or_strict')
 
     # make sure the target path is a directory when we're doing a recursive operation
     recurse = params['recurse']
@@ -231,11 +264,8 @@ def main():
     file_args = module.load_file_common_arguments(params)
 
     changed = False
-    diff = {'before':
-                {'path': path}
-            ,
-            'after':
-                {'path': path}
+    diff = {'before': {'path': path},
+            'after': {'path': path},
             }
 
     state_change = False
@@ -249,13 +279,13 @@ def main():
             if not module.check_mode:
                 if prev_state == 'directory':
                     try:
-                        shutil.rmtree(path, ignore_errors=False)
+                        shutil.rmtree(b_path, ignore_errors=False)
                     except Exception:
                         e = get_exception()
                         module.fail_json(msg="rmtree failed: %s" % str(e))
                 else:
                     try:
-                        os.unlink(path)
+                        os.unlink(b_path)
                     except Exception:
                         e = get_exception()
                         module.fail_json(path=path, msg="unlinking failed: %s " % str(e))
@@ -268,11 +298,12 @@ def main():
         if state_change:
             if follow and prev_state == 'link':
                 # follow symlink and operate on original
-                path = os.path.realpath(path)
-                prev_state = get_state(path)
+                b_path = os.path.realpath(b_path)
+                path = to_native(b_path, errors='strict')
+                prev_state = get_state(b_path)
                 file_args['path'] = path
 
-        if prev_state not in ['file','hard']:
+        if prev_state not in ('file', 'hard'):
             # file is not absent and any other state is a conflict
             module.fail_json(path=path, msg='file (%s) is %s, cannot continue' % (path, prev_state))
 
@@ -281,8 +312,9 @@ def main():
 
     elif state == 'directory':
         if follow and prev_state == 'link':
-            path = os.path.realpath(path)
-            prev_state = get_state(path)
+            b_path = os.path.realpath(b_path)
+            path = to_native(b_path, errors='strict')
+            prev_state = get_state(b_path)
 
         if prev_state == 'absent':
             if module.check_mode:
@@ -300,17 +332,18 @@ def main():
                     # Remove leading slash if we're creating a relative path
                     if not os.path.isabs(path):
                         curpath = curpath.lstrip('/')
-                    if not os.path.exists(curpath):
+                    b_curpath = to_bytes(curpath, errors='surrogate_or_strict')
+                    if not os.path.exists(b_curpath):
                         try:
-                            os.mkdir(curpath)
+                            os.mkdir(b_curpath)
                         except OSError:
                             ex = get_exception()
                             # Possibly something else created the dir since the os.path.exists
                             # check above. As long as it's a dir, we don't need to error out.
-                            if not (ex.errno == errno.EEXIST and os.path.isdir(curpath)):
+                            if not (ex.errno == errno.EEXIST and os.path.isdir(b_curpath)):
                                 raise
                         tmp_file_args = file_args.copy()
-                        tmp_file_args['path']=curpath
+                        tmp_file_args['path'] = curpath
                         changed = module.set_fs_attributes_if_different(tmp_file_args, changed, diff)
             except Exception:
                 e = get_exception()
@@ -323,45 +356,47 @@ def main():
         changed = module.set_fs_attributes_if_different(file_args, changed, diff)
 
         if recurse:
-            changed |= recursive_set_attributes(module, file_args['path'], follow, file_args)
+            changed |= recursive_set_attributes(module, to_bytes(file_args['path'], errors='surrogate_or_strict'), follow, file_args)
 
         module.exit_json(path=path, changed=changed, diff=diff)
 
-    elif state in ['link','hard']:
+    elif state in ('link', 'hard'):
 
-        if os.path.isdir(path) and not os.path.islink(path):
+        if os.path.isdir(b_path) and not os.path.islink(b_path):
             relpath = path
         else:
-            relpath = os.path.dirname(path)
+            b_relpath = os.path.dirname(b_path)
+            relpath = to_native(b_relpath, errors='strict')
 
         absrc = os.path.join(relpath, src)
-        if not os.path.exists(absrc) and not force:
+        b_absrc = to_bytes(absrc, errors='surrogate_or_strict')
+        if not os.path.exists(b_absrc) and not force:
             module.fail_json(path=path, src=src, msg='src file does not exist, use "force=yes" if you really want to create the link: %s' % absrc)
 
         if state == 'hard':
-            if not os.path.isabs(src):
+            if not os.path.isabs(b_src):
                 module.fail_json(msg="absolute paths are required")
         elif prev_state == 'directory':
             if not force:
                 module.fail_json(path=path, msg='refusing to convert between %s and %s for %s' % (prev_state, state, path))
-            elif len(os.listdir(path)) > 0:
+            elif len(os.listdir(b_path)) > 0:
                 # refuse to replace a directory that has files in it
                 module.fail_json(path=path, msg='the directory %s is not empty, refusing to convert it' % path)
-        elif prev_state in ['file', 'hard'] and not force:
+        elif prev_state in ('file', 'hard') and not force:
             module.fail_json(path=path, msg='refusing to convert between %s and %s for %s' % (prev_state, state, path))
 
         if prev_state == 'absent':
             changed = True
         elif prev_state == 'link':
-            old_src = os.readlink(path)
-            if old_src != src:
+            b_old_src = os.readlink(b_path)
+            if b_old_src != b_src:
                 changed = True
         elif prev_state == 'hard':
-            if not (state == 'hard' and os.stat(path).st_ino == os.stat(src).st_ino):
+            if not (state == 'hard' and os.stat(b_path).st_ino == os.stat(b_src).st_ino):
                 changed = True
                 if not force:
                     module.fail_json(dest=path, src=src, msg='Cannot link, different hard link exists at destination')
-        elif prev_state in ['file', 'directory']:
+        elif prev_state in ('file', 'directory'):
             changed = True
             if not force:
                 module.fail_json(dest=path, src=src, msg='Cannot link, %s exists at destination' % prev_state)
@@ -371,31 +406,33 @@ def main():
         if changed and not module.check_mode:
             if prev_state != 'absent':
                 # try to replace atomically
-                tmppath = '/'.join([os.path.dirname(path), ".%s.%s.tmp" % (os.getpid(),time.time())])
+                b_tmppath = to_bytes(os.path.sep).join(
+                    [os.path.dirname(b_path), to_bytes(".%s.%s.tmp" % (os.getpid(), time.time()))]
+                )
                 try:
                     if prev_state == 'directory' and (state == 'hard' or state == 'link'):
-                        os.rmdir(path)
+                        os.rmdir(b_path)
                     if state == 'hard':
-                        os.link(src,tmppath)
+                        os.link(b_src, b_tmppath)
                     else:
-                        os.symlink(src, tmppath)
-                    os.rename(tmppath, path)
+                        os.symlink(b_src, b_tmppath)
+                    os.rename(b_tmppath, b_path)
                 except OSError:
                     e = get_exception()
-                    if os.path.exists(tmppath):
-                        os.unlink(tmppath)
-                    module.fail_json(path=path, msg='Error while replacing: %s' % str(e))
+                    if os.path.exists(b_tmppath):
+                        os.unlink(b_tmppath)
+                    module.fail_json(path=path, msg='Error while replacing: %s' % to_native(e, nonstring='simplerepr'))
             else:
                 try:
                     if state == 'hard':
-                        os.link(src,path)
+                        os.link(b_src, b_path)
                     else:
-                        os.symlink(src, path)
+                        os.symlink(b_src, b_path)
                 except OSError:
                     e = get_exception()
-                    module.fail_json(path=path, msg='Error while linking: %s' % str(e))
+                    module.fail_json(path=path, msg='Error while linking: %s' % to_native(e, nonstring='simplerepr'))
 
-        if module.check_mode and not os.path.exists(path):
+        if module.check_mode and not os.path.exists(b_path):
             module.exit_json(dest=path, src=src, changed=changed, diff=diff)
 
         changed = module.set_fs_attributes_if_different(file_args, changed, diff)
@@ -406,16 +443,16 @@ def main():
 
             if prev_state == 'absent':
                 try:
-                    open(path, 'w').close()
+                    open(b_path, 'wb').close()
                 except OSError:
                     e = get_exception()
-                    module.fail_json(path=path, msg='Error, could not touch target: %s' % str(e))
-            elif prev_state in ['file', 'directory', 'hard']:
+                    module.fail_json(path=path, msg='Error, could not touch target: %s' % to_native(e, nonstring='simplerepr'))
+            elif prev_state in ('file', 'directory', 'hard'):
                 try:
-                    os.utime(path, None)
+                    os.utime(b_path, None)
                 except OSError:
                     e = get_exception()
-                    module.fail_json(path=path, msg='Error while touching existing target: %s' % str(e))
+                    module.fail_json(path=path, msg='Error while touching existing target: %s' % to_native(e, nonstring='simplerepr'))
             else:
                 module.fail_json(msg='Cannot touch other than files, directories, and hardlinks (%s is %s)' % (path, prev_state))
             try:
@@ -427,15 +464,12 @@ def main():
                     # somewhere in basic.py
                     if prev_state == 'absent':
                         # If we just created the file we can safely remove it
-                        os.remove(path)
+                        os.remove(b_path)
                 raise e
 
         module.exit_json(dest=path, changed=True, diff=diff)
 
     module.fail_json(path=path, msg='unexpected position reached')
 
-# import module snippets
-from ansible.module_utils.basic import *
 if __name__ == '__main__':
     main()
-

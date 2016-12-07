@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: ec2_tag 
@@ -89,7 +93,7 @@ tasks:
     instance: "{{ item.id }}"
     region: eu-west-1
     state: list
-  with_items: ec2.tagged_instances
+  with_items: "{{ ec2.tagged_instances }}"
   register: ec2_vol
 
 - name: tag the volumes

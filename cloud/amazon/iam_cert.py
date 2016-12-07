@@ -13,6 +13,10 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: iam_cert
@@ -232,7 +236,7 @@ def main():
         new_name=dict(default=None, required=False),
         path=dict(default='/', required=False),
         new_path=dict(default=None, required=False),
-        dup_ok=dict(default=False, required=False, choices=[False, True])
+        dup_ok=dict(default=False, required=False, type='bool')
     )
     )
 

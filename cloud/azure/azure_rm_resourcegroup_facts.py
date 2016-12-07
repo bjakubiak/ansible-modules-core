@@ -19,6 +19,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: azure_rm_resouregroup_facts
@@ -66,16 +70,11 @@ EXAMPLES = '''
           - foo:bar
 '''
 RETURN = '''
-changed:
-    description: Whether or not the object was changed.
-    returned: always
-    type: bool
-    sample: False
-objects:
-    description: List containing a set of facts for each selected object.
+azure_resourcegroups:
+    description: List of resource group dicts.
     returned: always
     type: list
-    sample: [{
+    example: [{
         "id": "/subscriptions/XXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXX/resourceGroups/Testing",
         "location": "westus",
         "name": "Testing",
@@ -114,7 +113,7 @@ class AzureRMResourceGroupFacts(AzureRMModuleBase):
 
         self.results = dict(
             changed=False,
-            results=[]
+            ansible_facts=dict(azure_resourcegroups=[])
         )
 
         self.name = None
@@ -130,9 +129,9 @@ class AzureRMResourceGroupFacts(AzureRMModuleBase):
             setattr(self, key, kwargs[key])
 
         if self.name:
-            self.results['objects'] = self.get_item()
+            self.results['ansible_facts']['azure_resourcegroups'] = self.get_item()
         else:
-            self.results['objects'] = self.list_items()
+            self.results['ansible_facts']['azure_resourcegroups'] = self.list_items()
 
         return self.results
 

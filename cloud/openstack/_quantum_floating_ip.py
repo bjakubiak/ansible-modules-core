@@ -29,6 +29,10 @@ try:
 except ImportError:
     HAVE_DEPS = False
 
+ANSIBLE_METADATA = {'status': ['deprecated'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: quantum_floating_ip
@@ -60,7 +64,7 @@ options:
      description:
         - The keystone url for authentication
      required: false
-     default: 'http://127.0.0.1:35357/v2.0/'
+     default: http://127.0.0.1:35357/v2.0/
    region_name:
      description:
         - Name of the region
@@ -95,10 +99,15 @@ requirements:
 '''
 
 EXAMPLES = '''
-# Assign a floating ip to the instance from an external network
-- quantum_floating_ip: state=present login_username=admin login_password=admin
-                       login_tenant_name=admin network_name=external_network
-                       instance_name=vm1 internal_network_name=internal_network
+- name: Assign a floating ip to the instance from an external network
+  quantum_floating_ip:
+    state: present
+    login_username: admin
+    login_password: admin
+    login_tenant_name: admin
+    network_name: external_network
+    instance_name: vm1
+    internal_network_name: internal_network
 '''
 
 def _get_ksclient(module, kwargs):

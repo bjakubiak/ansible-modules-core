@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: ec2_vol
@@ -135,7 +139,7 @@ EXAMPLES = '''
 - ec2_vol:
     instance: "{{ item.id }} "
     volume_size: 5
-  with_items: ec2.instances
+  with_items: "{{ ec2.instances }}"
   register: ec2_vol
 
 # Example: Launch an instance and then add a volume if not already attached
@@ -156,7 +160,7 @@ EXAMPLES = '''
     instance: "{{ item.id }}"
     name: my_existing_volume_Name_tag
     device_name: /dev/xvdf
-  with_items: ec2.instances
+  with_items: "{{ ec2.instances }}"
   register: ec2_vol
 
 # Remove a volume

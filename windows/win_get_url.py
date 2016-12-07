@@ -21,6 +21,10 @@
 # this is a windows documentation stub.  actual code lives in the .ps1
 # file of the same name
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: win_get_url
@@ -45,9 +49,12 @@ options:
     default: null
   force:
     description:
-      - If C(yes), will always download the file.  If C(no), will only
+      - If C(yes), will always download the file. If C(no), will only
         download the file if it does not exist or the remote file has been
-        modified more recently than the local file.
+        modified more recently than the local file. This works by sending
+        an http HEAD request to retrieve last modified time of the requested
+        resource, so for this to work, the remote web server must support
+        HEAD requests.
     version_added: "2.0"
     required: false
     choices: [ "yes", "no" ]
@@ -87,25 +94,37 @@ options:
 EXAMPLES = r'''
 # Downloading a JPEG and saving it to a file with the ansible command.
 # Note the "dest" is quoted rather instead of escaping the backslashes
-$ ansible -i hosts -c winrm -m win_get_url -a "url=http://www.example.com/earthrise.jpg dest='C:\Users\Administrator\earthrise.jpg'" all
+$ ansible -i hosts -c winrm -m win_get_url -a "url=http://www.example.com/earthrise.jpg dest='C:\\Users\\Administrator\\earthrise.jpg'" all
 
 # Playbook example
-- name: Download earthrise.jpg to 'C:\Users\RandomUser\earthrise.jpg'
+- name: Download earthrise.jpg to 'C:\\Users\\RandomUser\\earthrise.jpg'
   win_get_url:
-    url: 'http://www.example.com/earthrise.jpg'
-    dest: 'C:\Users\RandomUser\earthrise.jpg'
+    url: http://www.example.com/earthrise.jpg
+    dest: C:\Users\RandomUser\earthrise.jpg
 
 - name: Download earthrise.jpg to 'C:\Users\RandomUser\earthrise.jpg' only if modified
   win_get_url:
-    url: 'http://www.example.com/earthrise.jpg'
-    dest: 'C:\Users\RandomUser\earthrise.jpg'
+    url: http://www.example.com/earthrise.jpg
+    dest: C:\Users\RandomUser\earthrise.jpg
     force: no
 
 - name: Download earthrise.jpg to 'C:\Users\RandomUser\earthrise.jpg' through a proxy server.
   win_get_url:
-    url: 'http://www.example.com/earthrise.jpg'
-    dest: 'C:\Users\RandomUser\earthrise.jpg'
-    proxy_url: 'http://10.0.0.1:8080'
-    proxy_username: 'username'
-    proxy_password: 'password'
+    url: http://www.example.com/earthrise.jpg
+    dest: C:\Users\RandomUser\earthrise.jpg
+    proxy_url: http://10.0.0.1:8080
+    proxy_username: username
+    proxy_password: password
+'''
+RETURN = '''
+url:
+    description: requested url
+    returned: always
+    type: string
+    sample: http://www.example.com/earthrise.jpg
+dest:
+    description: destination file/path
+    returned: always
+    type: string
+    sample: 'C:\\Users\\RandomUser\\earthrise.jpg'
 '''

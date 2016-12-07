@@ -16,6 +16,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this software.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: apache2_module
@@ -47,10 +51,14 @@ requirements: ["a2enmod","a2dismod"]
 
 EXAMPLES = '''
 # enables the Apache2 module "wsgi"
-- apache2_module: state=present name=wsgi
+- apache2_module:
+    state: present
+    name: wsgi
 
 # disables the Apache2 module "wsgi"
-- apache2_module: state=absent name=wsgi
+- apache2_module:
+    state: absent
+    name: wsgi
 '''
 
 import re
@@ -79,6 +87,12 @@ def _module_is_enabled(module):
     name = module.params['name']
 
     result, stdout, stderr = module.run_command("%s -M" % control_binary)
+
+    """
+    Work around for Ubuntu Xenial listing php7_module as php7.0
+    """
+    if name == "php7.0":
+        name = "php7"
 
     if result != 0:
         module.fail_json(msg="Error executing %s: %s" % (control_binary, stderr))

@@ -15,6 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: cl_interface_policy
@@ -29,17 +33,18 @@ description:
       the switch, but not found in the "allowed" list, this interface will be
       unconfigured. By default this is `/etc/network/interface.d`
       For more details go the Configuring Interfaces at
-      http://docs.cumulusnetworks.com
+      U(http://docs.cumulusnetworks.com).
 notes:
     - lo must be included in the allowed list.
     - eth0 must be in allowed list if out of band management is done
 options:
     allowed:
         description:
-            - list of ports to run initial run at 10G
+            - List of ports to run initial run at 10G.
+        required: true
     location:
         description:
-            - folder to store interface files.
+            - Directory to store interface files.
         default: '/etc/network/interfaces.d/'
 '''
 
@@ -72,7 +77,7 @@ def read_current_int_dir(module):
     module.custom_currentportlist = os.listdir(module.params.get('location'))
 
 
-# take the allowed list and conver it to into a list
+# take the allowed list and convert it to into a list
 # of ports.
 def convert_allowed_list_to_port_range(module):
     allowedlist = module.params.get('allowed')

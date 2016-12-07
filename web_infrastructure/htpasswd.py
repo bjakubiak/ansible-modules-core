@@ -18,6 +18,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = """
 module: htpasswd
 version_added: "1.3"
@@ -74,11 +78,26 @@ author: "Ansible Core Team"
 
 EXAMPLES = """
 # Add a user to a password file and ensure permissions are set
-- htpasswd: path=/etc/nginx/passwdfile name=janedoe password=9s36?;fyNp owner=root group=www-data mode=0640
+- htpasswd:
+    path: /etc/nginx/passwdfile
+    name: janedoe
+    password: '9s36?;fyNp'
+    owner: root
+    group: www-data
+    mode: 0640
+
 # Remove a user from a password file
-- htpasswd: path=/etc/apache2/passwdfile name=foobar state=absent
+- htpasswd:
+    path: /etc/apache2/passwdfile
+    name: foobar
+    state: absent
+
 # Add a user to a password file suitable for use by libpam-pwdfile
-- htpasswd: path=/etc/mail/passwords name=alex password=oedu2eGh crypt_scheme=md5_crypt
+- htpasswd:
+    path: /etc/mail/passwords
+    name: alex
+    password: oedu2eGh
+    crypt_scheme: md5_crypt
 """
 
 
@@ -187,7 +206,7 @@ def main():
     arg_spec = dict(
         path=dict(required=True, aliases=["dest", "destfile"]),
         name=dict(required=True, aliases=["username"]),
-        password=dict(required=False, default=None),
+        password=dict(required=False, default=None, no_log=True),
         crypt_scheme=dict(required=False, default="apr_md5_crypt"),
         state=dict(required=False, default="present"),
         create=dict(type='bool', default='yes'),
@@ -257,7 +276,8 @@ def main():
 
 
 # import module snippets
-from ansible.module_utils.basic import *
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.pycompat24 import get_exception
 
 if __name__ == '__main__':
     main()

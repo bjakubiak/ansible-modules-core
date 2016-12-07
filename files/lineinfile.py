@@ -19,10 +19,9 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-import re
-import os
-import pipes
-import tempfile
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
 
 DOCUMENTATION = """
 ---
@@ -125,33 +124,78 @@ options:
 """
 
 EXAMPLES = r"""
-- lineinfile: dest=/etc/selinux/config regexp=^SELINUX= line=SELINUX=enforcing
+- lineinfile:
+    dest: /etc/selinux/config
+    regexp: '^SELINUX='
+    line: 'SELINUX=enforcing'
 
-- lineinfile: dest=/etc/sudoers state=absent regexp="^%wheel"
+- lineinfile:
+    dest: /etc/sudoers
+    state: absent
+    regexp: '^%wheel'
 
-- lineinfile: dest=/etc/hosts regexp='^127\.0\.0\.1' line='127.0.0.1 localhost' owner=root group=root mode=0644
+- lineinfile:
+    dest: /etc/hosts
+    regexp: '^127\.0\.0\.1'
+    line: '127.0.0.1 localhost'
+    owner: root
+    group: root
+    mode: 0644
 
-- lineinfile: dest=/etc/httpd/conf/httpd.conf regexp="^Listen " insertafter="^#Listen " line="Listen 8080"
+- lineinfile:
+    dest: /etc/httpd/conf/httpd.conf
+    regexp: '^Listen '
+    insertafter: '^#Listen '
+    line: 'Listen 8080'
 
-- lineinfile: dest=/etc/services regexp="^# port for http" insertbefore="^www.*80/tcp" line="# port for http by default"
+- lineinfile:
+    dest: /etc/services
+    regexp: '^# port for http'
+    insertbefore: '^www.*80/tcp'
+    line: '# port for http by default'
 
 # Add a line to a file if it does not exist, without passing regexp
-- lineinfile: dest=/tmp/testfile line="192.168.1.99 foo.lab.net foo"
+- lineinfile:
+    dest: /tmp/testfile
+    line: '192.168.1.99 foo.lab.net foo'
 
 # Fully quoted because of the ': ' on the line. See the Gotchas in the YAML docs.
-- lineinfile: "dest=/etc/sudoers state=present regexp='^%wheel' line='%wheel ALL=(ALL) NOPASSWD: ALL'"
+- lineinfile: "
+    dest: /etc/sudoers
+    state: present
+    regexp: '^%wheel'
+    line: '%wheel ALL=(ALL) NOPASSWD: ALL'
 
-- lineinfile: dest=/opt/jboss-as/bin/standalone.conf regexp='^(.*)Xms(\d+)m(.*)$' line='\1Xms${xms}m\3' backrefs=yes
+- lineinfile:
+    dest: /opt/jboss-as/bin/standalone.conf
+    regexp: '^(.*)Xms(\d+)m(.*)$'
+    line: '\1Xms${xms}m\3'
+    backrefs: yes
 
 # Validate the sudoers file before saving
-- lineinfile: dest=/etc/sudoers state=present regexp='^%ADMIN ALL\=' line='%ADMIN ALL=(ALL) NOPASSWD:ALL' validate='visudo -cf %s'
+- lineinfile:
+    dest: /etc/sudoers
+    state: present
+    regexp: '^%ADMIN ALL='
+    line: '%ADMIN ALL=(ALL) NOPASSWD: ALL'
+    validate: 'visudo -cf %s'
 """
 
-def write_changes(module,lines,dest):
+import re
+import os
+import tempfile
+
+# import module snippets
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.six import b
+from ansible.module_utils._text import to_bytes, to_native
+
+
+def write_changes(module, b_lines, dest):
 
     tmpfd, tmpfile = tempfile.mkstemp()
-    f = os.fdopen(tmpfd,'wb')
-    f.writelines(lines)
+    f = os.fdopen(tmpfd, 'wb')
+    f.writelines(b_lines)
     f.close()
 
     validate = module.params.get('validate', None)
@@ -159,13 +203,16 @@ def write_changes(module,lines,dest):
     if validate:
         if "%s" not in validate:
             module.fail_json(msg="validate must contain %%s: %s" % (validate))
-        (rc, out, err) = module.run_command(validate % tmpfile)
+        (rc, out, err) = module.run_command(to_bytes(validate % tmpfile, errors='surrogate_or_strict'))
         valid = rc == 0
         if rc != 0:
             module.fail_json(msg='failed to validate: '
-                                 'rc:%s error:%s' % (rc,err))
+                                 'rc:%s error:%s' % (rc, err))
     if valid:
-        module.atomic_move(tmpfile, os.path.realpath(dest))
+        module.atomic_move(tmpfile,
+                to_native(os.path.realpath(to_bytes(dest, errors='surrogate_or_strict')), errors='surrogate_or_strict'),
+                unsafe_writes=module.params['unsafe_writes'])
+
 
 def check_file_attrs(module, changed, message, diff):
 
@@ -188,44 +235,46 @@ def present(module, dest, regexp, line, insertafter, insertbefore, create,
             'before_header': '%s (content)' % dest,
             'after_header': '%s (content)' % dest}
 
-    if not os.path.exists(dest):
+    b_dest = to_bytes(dest, errors='surrogate_or_strict')
+    if not os.path.exists(b_dest):
         if not create:
             module.fail_json(rc=257, msg='Destination %s does not exist !' % dest)
-        destpath = os.path.dirname(dest)
-        if not os.path.exists(destpath) and not module.check_mode:
-            os.makedirs(destpath)
-        lines = []
+        b_destpath = os.path.dirname(b_dest)
+        if not os.path.exists(b_destpath) and not module.check_mode:
+            os.makedirs(b_destpath)
+        b_lines = []
     else:
-        f = open(dest, 'rb')
-        lines = f.readlines()
+        f = open(b_dest, 'rb')
+        b_lines = f.readlines()
         f.close()
 
     if module._diff:
-        diff['before'] = ''.join(lines)
+        diff['before'] = to_native(b('').join(b_lines))
 
     if regexp is not None:
-        mre = re.compile(regexp)
+        bre_m = re.compile(to_bytes(regexp, errors='surrogate_or_strict'))
 
     if insertafter not in (None, 'BOF', 'EOF'):
-        insre = re.compile(insertafter)
+        bre_ins = re.compile(to_bytes(insertafter, errors='surrogate_or_strict'))
     elif insertbefore not in (None, 'BOF'):
-        insre = re.compile(insertbefore)
+        bre_ins = re.compile(to_bytes(insertbefore, errors='surrogate_or_strict'))
     else:
-        insre = None
+        bre_ins = None
 
     # index[0] is the line num where regexp has been found
     # index[1] is the line num where insertafter/inserbefore has been found
     index = [-1, -1]
     m = None
-    for lineno, cur_line in enumerate(lines):
+    b_line = to_bytes(line, errors='surrogate_or_strict')
+    for lineno, b_cur_line in enumerate(b_lines):
         if regexp is not None:
-            match_found = mre.search(cur_line)
+            match_found = bre_m.search(b_cur_line)
         else:
-            match_found = line == cur_line.rstrip('\r\n')
+            match_found = b_line == b_cur_line.rstrip(b('\r\n'))
         if match_found:
             index[0] = lineno
             m = match_found
-        elif insre is not None and insre.search(cur_line):
+        elif bre_ins is not None and bre_ins.search(b_cur_line):
             if insertafter:
                 # + 1 for the next line
                 index[1] = lineno + 1
@@ -236,18 +285,19 @@ def present(module, dest, regexp, line, insertafter, insertbefore, create,
     msg = ''
     changed = False
     # Regexp matched a line in the file
+    b_linesep = to_bytes(os.linesep, errors='surrogate_or_strict')
     if index[0] != -1:
         if backrefs:
-            new_line = m.expand(line)
+            b_new_line = m.expand(b_line)
         else:
             # Don't do backref expansion if not asked.
-            new_line = line
+            b_new_line = b_line
 
-        if not new_line.endswith(os.linesep):
-            new_line += os.linesep
+        if not b_new_line.endswith(b_linesep):
+            b_new_line += b_linesep
 
-        if lines[index[0]] != new_line:
-            lines[index[0]] = new_line
+        if b_lines[index[0]] != b_new_line:
+            b_lines[index[0]] = b_new_line
             msg = 'line replaced'
             changed = True
     elif backrefs:
@@ -256,7 +306,7 @@ def present(module, dest, regexp, line, insertafter, insertbefore, create,
         pass
     # Add it to the beginning of the file
     elif insertbefore == 'BOF' or insertafter == 'BOF':
-        lines.insert(0, line + os.linesep)
+        b_lines.insert(0, b_line + b_linesep)
         msg = 'line added'
         changed = True
     # Add it to the end of the file if requested or
@@ -265,28 +315,28 @@ def present(module, dest, regexp, line, insertafter, insertbefore, create,
     elif insertafter == 'EOF' or index[1] == -1:
 
         # If the file is not empty then ensure there's a newline before the added line
-        if len(lines)>0 and not (lines[-1].endswith('\n') or lines[-1].endswith('\r')):
-            lines.append(os.linesep)
+        if len(b_lines) > 0 and not b_lines[-1][-1:] in (b('\n'), b('\r')):
+            b_lines.append(b_linesep)
 
-        lines.append(line + os.linesep)
+        b_lines.append(b_line + b_linesep)
         msg = 'line added'
         changed = True
     # insert* matched, but not the regexp
     else:
-        lines.insert(index[1], line + os.linesep)
+        b_lines.insert(index[1], b_line + b_linesep)
         msg = 'line added'
         changed = True
 
     if module._diff:
-        diff['after'] = ''.join(lines)
+        diff['after'] = to_native(b('').join(b_lines))
 
     backupdest = ""
     if changed and not module.check_mode:
-        if backup and os.path.exists(dest):
+        if backup and os.path.exists(b_dest):
             backupdest = module.backup_local(dest)
-        write_changes(module, lines, dest)
+        write_changes(module, b_lines, dest)
 
-    if module.check_mode and not os.path.exists(dest):
+    if module.check_mode and not os.path.exists(b_dest):
         module.exit_json(changed=changed, msg=msg, backup=backupdest, diff=diff)
 
     attr_diff = {}
@@ -301,7 +351,8 @@ def present(module, dest, regexp, line, insertafter, insertbefore, create,
 
 def absent(module, dest, regexp, line, backup):
 
-    if not os.path.exists(dest):
+    b_dest = to_bytes(dest, errors='surrogate_or_strict')
+    if not os.path.exists(b_dest):
         module.exit_json(changed=False, msg="file not present")
 
     msg = ''
@@ -310,37 +361,38 @@ def absent(module, dest, regexp, line, backup):
             'before_header': '%s (content)' % dest,
             'after_header': '%s (content)' % dest}
 
-    f = open(dest, 'rb')
-    lines = f.readlines()
+    f = open(b_dest, 'rb')
+    b_lines = f.readlines()
     f.close()
 
     if module._diff:
-        diff['before'] = ''.join(lines)
+        diff['before'] = to_native(b('').join(b_lines))
 
     if regexp is not None:
-        cre = re.compile(regexp)
+        bre_c = re.compile(to_bytes(regexp, errors='surrogate_or_strict'))
     found = []
 
-    def matcher(cur_line):
+    b_line = to_bytes(line, errors='surrogate_or_strict')
+    def matcher(b_cur_line):
         if regexp is not None:
-            match_found = cre.search(cur_line)
+            match_found = bre_c.search(b_cur_line)
         else:
-            match_found = line == cur_line.rstrip('\r\n')
+            match_found = b_line == b_cur_line.rstrip(b('\r\n'))
         if match_found:
-            found.append(cur_line)
+            found.append(b_cur_line)
         return not match_found
 
-    lines = filter(matcher, lines)
+    b_lines = [l for l in b_lines if matcher(l)]
     changed = len(found) > 0
 
     if module._diff:
-        diff['after'] = ''.join(lines)
+        diff['after'] = to_native(b('').join(b_lines))
 
     backupdest = ""
     if changed and not module.check_mode:
         if backup:
             backupdest = module.backup_local(dest)
-        write_changes(module, lines, dest)
+        write_changes(module, b_lines, dest)
 
     if changed:
         msg = "%s line(s) removed" % len(found)
@@ -359,7 +411,7 @@ def absent(module, dest, regexp, line, backup):
 def main():
     module = AnsibleModule(
         argument_spec=dict(
-            dest=dict(required=True, aliases=['name', 'destfile']),
+            dest=dict(required=True, aliases=['name', 'destfile'], type='path'),
             state=dict(default='present', choices=['absent', 'present']),
             regexp=dict(default=None),
             line=dict(aliases=['value']),
@@ -376,13 +428,13 @@ def main():
     )
 
     params = module.params
-    create = module.params['create']
-    backup = module.params['backup']
-    backrefs = module.params['backrefs']
-    dest = os.path.expanduser(params['dest'])
+    create = params['create']
+    backup = params['backup']
+    backrefs = params['backrefs']
+    dest = params['dest']
 
-
-    if os.path.isdir(dest):
+    b_dest = to_bytes(dest, errors='surrogate_or_strict')
+    if os.path.isdir(b_dest):
         module.fail_json(rc=256, msg='Destination %s is a directory !' % dest)
 
     if params['state'] == 'present':
@@ -408,8 +460,5 @@ def main():
 
         absent(module, dest, params['regexp'], params.get('line', None), backup)
 
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.splitter import *
 if __name__ == '__main__':
     main()

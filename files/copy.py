@@ -18,8 +18,9 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-import os
-import tempfile
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
 
 DOCUMENTATION = '''
 ---
@@ -105,19 +106,43 @@ notes:
 
 EXAMPLES = '''
 # Example from Ansible Playbooks
-- copy: src=/srv/myfiles/foo.conf dest=/etc/foo.conf owner=foo group=foo mode=0644
+- copy:
+    src: /srv/myfiles/foo.conf
+    dest: /etc/foo.conf
+    owner: foo
+    group: foo
+    mode: 0644
 
 # The same example as above, but using a symbolic mode equivalent to 0644
-- copy: src=/srv/myfiles/foo.conf dest=/etc/foo.conf owner=foo group=foo mode="u=rw,g=r,o=r"
+- copy:
+    src: /srv/myfiles/foo.conf
+    dest: /etc/foo.conf
+    owner: foo
+    group: foo
+    mode: "u=rw,g=r,o=r"
 
 # Another symbolic mode example, adding some permissions and removing others
-- copy: src=/srv/myfiles/foo.conf dest=/etc/foo.conf owner=foo group=foo mode="u+rw,g-wx,o-rwx"
+- copy:
+    src: /srv/myfiles/foo.conf
+    dest: /etc/foo.conf
+    owner: foo
+    group: foo
+    mode: "u+rw,g-wx,o-rwx"
 
 # Copy a new "ntp.conf file into place, backing up the original if it differs from the copied version
-- copy: src=/mine/ntp.conf dest=/etc/ntp.conf owner=root group=root mode=644 backup=yes
+- copy:
+    src: /mine/ntp.conf
+    dest: /etc/ntp.conf
+    owner: root
+    group: root
+    mode: 0644
+    backup: yes
 
 # Copy a new "sudoers" file into place, after passing validation with visudo
-- copy: src=/mine/sudoers dest=/etc/sudoers validate='visudo -cf %s'
+- copy:
+    src: /mine/sudoers
+    dest: /etc/sudoers
+    validate: 'visudo -cf %s'
 '''
 
 RETURN = '''
@@ -137,7 +162,7 @@ md5sum:
     type: string
     sample: "2a5aeecc61dc98c4d780b14b330e3282"
 checksum:
-    description: checksum of the file after running copy
+    description: sha1 checksum of the file after running copy
     returned: success
     type: string
     sample: "6e642bb8dd5c2e027bf21dd923337cbb4214f827"
@@ -183,16 +208,28 @@ state:
     sample: "file"
 '''
 
+import os
+import shutil
+import tempfile
+import traceback
+
+# import module snippets
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.pycompat24 import get_exception
+from ansible.module_utils._text import to_bytes, to_native
+
+
 def split_pre_existing_dir(dirname):
     '''
     Return the first pre-existing directory and a list of the new directories that will be created.
     '''
 
     head, tail = os.path.split(dirname)
-    if not os.path.exists(head):
+    b_head = to_bytes(head, errors='surrogate_or_strict')
+    if not os.path.exists(b_head):
         (pre_existing_dir, new_directory_list) = split_pre_existing_dir(head)
     else:
-        return (head, [ tail ])
+        return (head, [tail])
     new_directory_list.append(tail)
     return (pre_existing_dir, new_directory_list)
 
@@ -215,10 +252,10 @@ def main():
     module = AnsibleModule(
         # not checking because of daisy chain to file module
         argument_spec = dict(
-            src               = dict(required=False),
-            original_basename = dict(required=False), # used to handle 'dest is a directory' via template, a slight hack
+            src               = dict(required=False, type='path'),
+            original_basename = dict(required=False),  # used to handle 'dest is a directory' via template, a slight hack
             content           = dict(required=False, no_log=True),
-            dest              = dict(required=True),
+            dest              = dict(required=True, type='path'),
             backup            = dict(default=False, type='bool'),
             force             = dict(default=True, aliases=['thirsty'], type='bool'),
             validate          = dict(required=False, type='str'),
@@ -229,21 +266,23 @@ def main():
         supports_check_mode=True,
     )
 
-    src    = os.path.expanduser(module.params['src'])
-    dest   = os.path.expanduser(module.params['dest'])
+    src = module.params['src']
+    b_src = to_bytes(src, errors='surrogate_or_strict')
+    dest = module.params['dest']
+    b_dest = to_bytes(dest, errors='surrogate_or_strict')
     backup = module.params['backup']
-    force  = module.params['force']
-    original_basename = module.params.get('original_basename',None)
-    validate = module.params.get('validate',None)
+    force = module.params['force']
+    original_basename = module.params.get('original_basename', None)
+    validate = module.params.get('validate', None)
     follow = module.params['follow']
-    mode   = module.params['mode']
+    mode = module.params['mode']
     remote_src = module.params['remote_src']
 
-    if not os.path.exists(src):
+    if not os.path.exists(b_src):
         module.fail_json(msg="Source %s not found" % (src))
-    if not os.access(src, os.R_OK):
+    if not os.access(b_src, os.R_OK):
         module.fail_json(msg="Source %s not readable" % (src))
-    if os.path.isdir(src):
+    if os.path.isdir(b_src):
         module.fail_json(msg="Remote copy does not support recursive copy of directory: %s" % (src))
 
     checksum_src = module.sha1(src)
@@ -259,10 +298,12 @@ def main():
     # Special handling for recursive copy - create intermediate dirs
     if original_basename and dest.endswith(os.sep):
         dest = os.path.join(dest, original_basename)
+        b_dest = to_bytes(dest, errors='surrogate_or_strict')
         dirname = os.path.dirname(dest)
-        if not os.path.exists(dirname) and os.path.isabs(dirname):
+        b_dirname = to_bytes(dirname, errors='surrogate_or_strict')
+        if not os.path.exists(b_dirname) and os.path.isabs(b_dirname):
             (pre_existing_dir, new_directory_list) = split_pre_existing_dir(dirname)
-            os.makedirs(dirname)
+            os.makedirs(b_dirname)
             directory_args = module.load_file_common_arguments(module.params)
             directory_mode = module.params["directory_mode"]
             if directory_mode is not None:
@@ -271,45 +312,48 @@ def main():
                 directory_args['mode'] = None
             adjust_recursive_directory_permissions(pre_existing_dir, new_directory_list, module, directory_args, changed)
 
-    if os.path.exists(dest):
-        if os.path.islink(dest) and follow:
-            dest = os.path.realpath(dest)
+    if os.path.isdir(b_dest):
+        basename = os.path.basename(src)
+        if original_basename:
+            basename = original_basename
+        dest = os.path.join(dest, basename)
+        b_dest = to_bytes(dest, errors='surrogate_or_strict')
+
+    if os.path.exists(b_dest):
+        if os.path.islink(b_dest) and follow:
+            b_dest = os.path.realpath(b_dest)
+            dest = to_native(b_dest, errors='surrogate_or_strict')
         if not force:
             module.exit_json(msg="file already exists", src=src, dest=dest, changed=False)
-        if (os.path.isdir(dest)):
-            basename = os.path.basename(src)
-            if original_basename:
-                basename = original_basename
-            dest = os.path.join(dest, basename)
-        if os.access(dest, os.R_OK):
+        if os.access(b_dest, os.R_OK):
             checksum_dest = module.sha1(dest)
     else:
-        if not os.path.exists(os.path.dirname(dest)):
+        if not os.path.exists(os.path.dirname(b_dest)):
             try:
                 # os.path.exists() can return false in some
                 # circumstances where the directory does not have
                 # the execute bit for the current user set, in
                 # which case the stat() call will raise an OSError
-                os.stat(os.path.dirname(dest))
+                os.stat(os.path.dirname(b_dest))
             except OSError:
                 e = get_exception()
-                if "permission denied" in str(e).lower():
+                if "permission denied" in to_native(e).lower():
                     module.fail_json(msg="Destination directory %s is not accessible" % (os.path.dirname(dest)))
             module.fail_json(msg="Destination directory %s does not exist" % (os.path.dirname(dest)))
-    if not os.access(os.path.dirname(dest), os.W_OK):
+    if not os.access(os.path.dirname(b_dest), os.W_OK):
         module.fail_json(msg="Destination %s not writable" % (os.path.dirname(dest)))
 
     backup_file = None
-    if checksum_src != checksum_dest or os.path.islink(dest):
+    if checksum_src != checksum_dest or os.path.islink(b_dest):
         if not module.check_mode:
             try:
                 if backup:
-                    if os.path.exists(dest):
+                    if os.path.exists(b_dest):
                         backup_file = module.backup_local(dest)
                 # allow for conversion from symlink.
-                if os.path.islink(dest):
-                    os.unlink(dest)
-                    open(dest, 'w').close()
+                if os.path.islink(b_dest):
+                    os.unlink(b_dest)
+                    open(b_dest, 'w').close()
                 if validate:
                     # if we have a mode, make sure we set it on the temporary
                     # file source as some validations may require it
@@ -318,15 +362,14 @@ def main():
                         module.set_mode_if_different(src, mode, False)
                     if "%s" not in validate:
                         module.fail_json(msg="validate must contain %%s: %s" % (validate))
-                    (rc,out,err) = module.run_command(validate % src)
+                    (rc, out, err) = module.run_command(validate % src)
                     if rc != 0:
                         module.fail_json(msg="failed to validate", exit_status=rc, stdout=out, stderr=err)
+                b_mysrc = b_src
                 if remote_src:
-                    _, tmpdest = tempfile.mkstemp(dir=os.path.dirname(dest))
-                    shutil.copy2(src, tmpdest)
-                    module.atomic_move(tmpdest, dest)
-                else:
-                    module.atomic_move(src, dest)
+                    _, b_mysrc = tempfile.mkstemp(dir=os.path.dirname(b_dest))
+                    shutil.copy2(b_src, b_mysrc)
+                module.atomic_move(b_mysrc, dest, unsafe_writes=module.params['unsafe_writes'])
             except IOError:
                 module.fail_json(msg="failed to copy: %s to %s" % (src, dest), traceback=traceback.format_exc())
         changed = True
@@ -334,17 +377,17 @@ def main():
         changed = False
 
     res_args = dict(
-        dest = dest, src = src, md5sum = md5sum_src, checksum = checksum_src, changed = changed
+        dest=dest, src=src, md5sum=md5sum_src, checksum=checksum_src, changed=changed
     )
     if backup_file:
         res_args['backup_file'] = backup_file
 
     module.params['dest'] = dest
-    file_args = module.load_file_common_arguments(module.params)
-    res_args['changed'] = module.set_fs_attributes_if_different(file_args, res_args['changed'])
+    if not module.check_mode:
+        file_args = module.load_file_common_arguments(module.params)
+        res_args['changed'] = module.set_fs_attributes_if_different(file_args, res_args['changed'])
 
     module.exit_json(**res_args)
 
-# import module snippets
-from ansible.module_utils.basic import *
-main()
+if __name__ == '__main__':
+    main()

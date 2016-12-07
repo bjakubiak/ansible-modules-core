@@ -18,6 +18,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: setup
@@ -37,6 +41,12 @@ options:
               not want to display those."
         required: false
         default: 'all'
+    gather_timeout:
+        version_added: "2.2"
+        description:
+            - "Set the default timeout in seconds for individual fact gathering"
+        required: false
+        default: 10
     filter:
         version_added: "1.1"
         description:
@@ -111,8 +121,9 @@ def main():
     module = AnsibleModule(
         argument_spec = dict(
             gather_subset=dict(default=["all"], required=False, type='list'),
+            gather_timeout=dict(default=10, required=False, type='int'),
             filter=dict(default="*", required=False),
-            fact_path=dict(default='/etc/ansible/facts.d', required=False),
+            fact_path=dict(default='/etc/ansible/facts.d', required=False, type='path'),
         ),
         supports_check_mode = True,
     )

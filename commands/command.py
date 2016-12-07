@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # (c) 2012, Michael DeHaan <michael.dehaan@gmail.com>, and others
+# (c) 2016, Toshio Kuratomi <tkuratomi@ansible.com>
 #
 # This file is part of Ansible
 #
@@ -18,14 +19,9 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-import copy
-import sys
-import datetime
-import glob
-import traceback
-import re
-import shlex
-import os
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
 
 DOCUMENTATION = '''
 ---
@@ -36,7 +32,7 @@ description:
      - The M(command) module takes the command name followed by a list of space-delimited arguments.
      - The given command will be executed on all selected nodes. It will not be
        processed through the shell, so variables like C($HOME) and operations
-       like C("<"), C(">"), C("|"), and C("&") will not work (use the M(shell)
+       like C("<"), C(">"), C("|"), C(";") and C("&") will not work (use the M(shell)
        module if you need these features).
 options:
   free_form:
@@ -101,47 +97,24 @@ EXAMPLES = '''
     creates: /path/to/database
 '''
 
-# Dict of options and their defaults
-OPTIONS = {'chdir': None,
-           'creates': None,
-           'executable': None,
-           'NO_LOG': None,
-           'removes': None,
-           'warn': True,
-           }
+import datetime
+import glob
+import shlex
+import os
 
-# This is a pretty complex regex, which functions as follows:
-#
-# 1. (^|\s)
-# ^ look for a space or the beginning of the line
-# 2. ({options_list})=
-# ^ expanded to (chdir|creates|executable...)=
-#   look for a valid param, followed by an '='
-# 3. (?P<quote>[\'"])?
-# ^ look for an optional quote character, which can either be
-#   a single or double quote character, and store it for later
-# 4. (.*?)
-# ^ match everything in a non-greedy manner until...
-# 5. (?(quote)(?<!\\)(?P=quote))((?<!\\)(?=\s)|$)
-# ^ a non-escaped space or a non-escaped quote of the same kind
-#   that was matched in the first 'quote' is found, or the end of
-#   the line is reached
-OPTIONS_REGEX = '|'.join(OPTIONS.keys())
-PARAM_REGEX = re.compile(
-    r'(^|\s)(' + OPTIONS_REGEX +
-    r')=(?P<quote>[\'"])?(.*?)(?(quote)(?<!\\)(?P=quote))((?<!\\)(?=\s)|$)'
-)
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.six import b
 
 
 def check_command(commandline):
     arguments = { 'chown': 'owner', 'chmod': 'mode', 'chgrp': 'group',
                   'ln': 'state=link', 'mkdir': 'state=directory',
                   'rmdir': 'state=absent', 'rm': 'state=absent', 'touch': 'state=touch' }
-    commands  = { 'git': 'git', 'hg': 'hg', 'curl': 'get_url or uri', 'wget': 'get_url or uri',
+    commands  = { 'hg': 'hg', 'curl': 'get_url or uri', 'wget': 'get_url or uri',
                   'svn': 'subversion', 'service': 'service',
                   'mount': 'mount', 'rpm': 'yum, dnf or zypper', 'yum': 'yum', 'apt-get': 'apt',
                   'tar': 'unarchive', 'unzip': 'unarchive', 'sed': 'template or lineinfile',
-                  'rsync': 'synchronize', 'dnf': 'dnf', 'zypper': 'zypper' }
+                  'dnf': 'dnf', 'zypper': 'zypper' }
     become   = [ 'sudo', 'su', 'pbrun', 'pfexec', 'runas' ]
     warnings = list()
     command = os.path.basename(commandline.split()[0])
@@ -162,10 +135,10 @@ def main():
         argument_spec=dict(
           _raw_params = dict(),
           _uses_shell = dict(type='bool', default=False),
-          chdir = dict(),
+          chdir = dict(type='path'),
           executable = dict(),
-          creates = dict(),
-          removes = dict(),
+          creates = dict(type='path'),
+          removes = dict(type='path'),
           warn = dict(type='bool', default=True),
         )
     )
@@ -173,43 +146,39 @@ def main():
     shell = module.params['_uses_shell']
     chdir = module.params['chdir']
     executable = module.params['executable']
-    args  = module.params['_raw_params']
-    creates  = module.params['creates']
-    removes  = module.params['removes']
+    args = module.params['_raw_params']
+    creates = module.params['creates']
+    removes = module.params['removes']
     warn = module.params['warn']
 
     if args.strip() == '':
         module.fail_json(rc=256, msg="no command given")
 
     if chdir:
-        chdir = os.path.abspath(os.path.expanduser(chdir))
+        chdir = os.path.abspath(chdir)
         os.chdir(chdir)
 
     if creates:
         # do not run the command if the line contains creates=filename
         # and the filename already exists.  This allows idempotence
         # of command executions.
-        v = os.path.expanduser(creates)
-        if glob.glob(v):
+        if glob.glob(creates):
             module.exit_json(
                 cmd=args,
-                stdout="skipped, since %s exists" % v,
+                stdout="skipped, since %s exists" % creates,
                 changed=False,
-                stderr=False,
                 rc=0
             )
 
     if removes:
-    # do not run the command if the line contains removes=filename
-    # and the filename does not exist.  This allows idempotence
-    # of command executions.
-        v = os.path.expanduser(removes)
-        if not glob.glob(v):
+        # do not run the command if the line contains removes=filename
+        # and the filename does not exist.  This allows idempotence
+        # of command executions.
+        if not glob.glob(removes):
             module.exit_json(
                 cmd=args,
-                stdout="skipped, since %s does not exist" % v,
+                stdout="skipped, since %s does not exist" % removes,
                 changed=False,
-                stderr=False,
                 rc=0
             )
 
@@ -221,20 +190,20 @@ def main():
         args = shlex.split(args)
     startd = datetime.datetime.now()
 
-    rc, out, err = module.run_command(args, executable=executable, use_unsafe_shell=shell)
+    rc, out, err = module.run_command(args, executable=executable, use_unsafe_shell=shell, encoding=None)
 
     endd = datetime.datetime.now()
     delta = endd - startd
 
     if out is None:
-        out = ''
+        out = b('')
     if err is None:
-        err = ''
+        err = b('')
 
     module.exit_json(
         cmd      = args,
-        stdout   = out.rstrip("\r\n"),
-        stderr   = err.rstrip("\r\n"),
+        stdout   = out.rstrip(b("\r\n")),
+        stderr   = err.rstrip(b("\r\n")),
         rc       = rc,
         start    = str(startd),
         end      = str(endd),
@@ -243,8 +212,5 @@ def main():
         warnings = warnings
     )
 
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.splitter import *
-
-main()
+if __name__ == '__main__':
+    main()

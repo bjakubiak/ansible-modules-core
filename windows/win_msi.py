@@ -21,6 +21,10 @@
 # this is a windows documentation stub.  actual code lives in the .ps1
 # file of the same name
 
+ANSIBLE_METADATA = {'status': ['deprecated'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: win_msi
@@ -55,21 +59,24 @@ options:
             - Specify whether to wait for install or uninstall to complete before continuing.
         choices:
             - true
-            - yes
             - false
-            - no
         default: false
 author: "Matt Martz (@sivel)"
 '''
 
 EXAMPLES = '''
-# Install an MSI file
-- win_msi: path=C:\\\\7z920-x64.msi
+- name: Install an MSI file
+  win_msi:
+    path: C:\7z920-x64.msi
 
-# Install an MSI, and wait for it to complete before continuing
-- win_msi: path=C:\\\\7z920-x64.msi wait=true
+- name: Install an MSI, and wait for it to complete before continuing
+  win_msi:
+    path: C:\7z920-x64.msi
+    wait: true
 
-# Uninstall an MSI file
-- win_msi: path=C:\\\\7z920-x64.msi state=absent
+- name: Uninstall an MSI file
+  win_msi:
+    path: C:\7z920-x64.msi
+    state: absent
 '''
 

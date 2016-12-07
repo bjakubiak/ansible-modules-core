@@ -15,6 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: cl_interface
@@ -28,82 +32,83 @@ description:
       bond ports use the cl_bond module. When configuring bridge related
       features like the "vid" option, please follow the guidelines for
       configuring "vlan aware" bridging. For more details review the Layer2
-      Interface Guide at http://docs.cumulusnetworks.com
+      Interface Guide at U(http://docs.cumulusnetworks.com)
 options:
     name:
         description:
-            - name of the interface
+            - Name of the interface.
         required: true
     alias_name:
         description:
-            - add a port description
+            - Description of the port.
     ipv4:
         description:
-            - list of IPv4 addresses to configure on the interface.
-              use X.X.X.X/YY syntax.
+            - List of IPv4 addresses to configure on the interface.
+              In the form I(X.X.X.X/YY).
     ipv6:
         description:
-            - list of IPv6 addresses  to configure on the interface.
-              use X:X:X::X/YYY syntax
+            - List of IPv6 addresses to configure on the interface.
+              In the form I(X:X:X::X/YYY).
     addr_method:
         description:
-            - can be loopback for loopback interfaces or dhcp for dhcp
-              interfaces.
+            - Address method.
+        choices:
+            - loopback
+            - dhcp
     speed:
         description:
-            - set speed of the swp(front panel) or management(eth0) interface.
-              speed is in MB
+            - Set speed of the swp(front panel) or management(eth0) interface.
+              speed is in MB.
     mtu:
         description:
-            - set MTU. Configure Jumbo Frame by setting MTU to 9000.
-
+            - Set MTU. Configure Jumbo Frame by setting MTU to I(9000).
     virtual_ip:
         description:
-            - define IPv4 virtual IP used by the Cumulus VRR feature
+            - Define IPv4 virtual IP used by the Cumulus Linux VRR feature.
     virtual_mac:
         description:
-            - define Ethernet mac associated with Cumulus VRR feature
+            - Define Ethernet mac associated with Cumulus Linux VRR feature.
     vids:
         description:
-            - in vlan aware mode, lists vlans defined under the interface
+            - In vlan-aware mode, lists VLANs defined under the interface.
     mstpctl_bpduguard:
         description:
-            - Enables BPDU Guard on a port in vlan-aware mode
+            - Enables BPDU Guard on a port in vlan-aware mode.
     mstpctl_portnetwork:
         description:
-            - Enables bridge assurance in vlan-aware mode
+            - Enables bridge assurance in vlan-aware mode.
     mstpctl_portadminedge:
         description:
-            - Enables admin edge port
+            - Enables admin edge port.
     clagd_enable:
         description:
             - Enables the clagd daemon. This command should only be applied to
-              the clag peerlink interface
+              the clag peerlink interface.
     clagd_priority:
         description:
             - Integer that changes the role the switch has in the clag domain.
               The lower priority switch will assume the primary role. The number
-              can be between 0 and 65535
+              can be between 0 and 65535.
     clagd_peer_ip:
         description:
-            - IP address of the directly connected peer switch interface
+            - IP address of the directly connected peer switch interface.
     clagd_sys_mac:
         description:
             - Clagd system mac address. Recommended to use the range starting
-              with 44:38:39:ff. Needs to be the same between 2 Clag switches
+              with 44:38:39:ff. Needs to be the same between 2 Clag switches.
     pvid:
         description:
-            - in vlan aware mode, defines vlan that is the untagged vlan
+            - In vlan-aware mode, defines vlan that is the untagged vlan.
     location:
         description:
-            - interface directory location
+            - Interface directory location
         default:
-            - /etc/network/interfaces.d
+            - '/etc/network/interfaces.d'
 
 requirements: [ Alternate Debian network interface manager - \
 ifupdown2 @ github.com/CumulusNetworks/ifupdown2 ]
 notes:
-    - because the module writes the interface directory location. Ensure that
+    - As this module writes the interface directory location, ensure that
       ``/etc/network/interfaces`` has a 'source /etc/network/interfaces.d/\*' or
       whatever path is mentioned in the ``location`` attribute.
 
@@ -113,45 +118,55 @@ notes:
 
 EXAMPLES = '''
 # Options ['virtual_mac', 'virtual_ip'] are required together
-# configure a front panel port with an IP
-cl_interface: name=swp1  ipv4=10.1.1.1/24
-notify: reload networking
+- name: Configure a front panel port with an IP
+  cl_interface:
+    name: swp1
+    ipv4: 10.1.1.1/24
+  notify: reload networking
 
-# configure front panel to use DHCP
-cl_interface: name=swp2 addr_family=dhcp
-notify: reload networking
+- name: Configure front panel to use DHCP
+  cl_interface:
+    name: swp2
+    addr_family: dhcp
+  notify: reload networking
 
-# configure a SVI for vlan 100 interface with an IP
-cl_interface: name=bridge.100 ipv4=10.1.1.1/24
-notify: reload networking
+- name: Configure a SVI for vlan 100 interface with an IP
+  cl_interface:
+    name: bridge.100
+    ipv4: 10.1.1.1/24
+  notify: reload networking
 
-# configure subinterface with an IP
-cl_interface: name=bond0.100  alias_name='my bond' ipv4=10.1.1.1/24
-notify: reload networking
+- name: Configure subinterface with an IP
+  cl_interface:
+    name: bond0.100
+    alias_name: 'my bond'
+    ipv4: 10.1.1.1/24
+  notify: reload networking
 
 # define cl_interfaces once in tasks
-# then write intefaces in variables file
+# then write interfaces in variables file
 # with just the options you want.
-cl_interface:
-  name: "{{ item.key }}"
-  ipv4: "{{ item.value.ipv4|default(omit) }}"
-  ipv6: "{{ item.value.ipv6|default(omit) }}"
-  alias_name: "{{ item.value.alias_name|default(omit) }}"
-  addr_method: "{{ item.value.addr_method|default(omit) }}"
-  speed: "{{ item.value.link_speed|default(omit) }}"
-  mtu: "{{ item.value.mtu|default(omit) }}"
-  clagd_enable: "{{ item.value.clagd_enable|default(omit) }}"
-  clagd_peer_ip: "{{ item.value.clagd_peer_ip|default(omit) }}"
-  clagd_sys_mac: "{{ item.value.clagd_sys_mac|default(omit) }}"
-  clagd_priority: "{{ item.value.clagd_priority|default(omit) }}"
-  vids: "{{ item.value.vids|default(omit) }}"
-  virtual_ip: "{{ item.value.virtual_ip|default(omit) }}"
-  virtual_mac: "{{ item.value.virtual_mac|default(omit) }}"
-  mstpctl_portnetwork: "{{ item.value.mstpctl_portnetwork|default('no') }}"
-  mstpctl_portadminedge: "{{ item.value.mstpctl_portadminedge|default('no') }}"
-  mstpctl_bpduguard: "{{ item.value.mstpctl_bpduguard|default('no') }}"
-with_dict: cl_interfaces
-notify: reload networking
+  - name: Create interfaces
+    cl_interface:
+      name: "{{ item.key }}"
+      ipv4: "{{ item.value.ipv4 | default(omit) }}"
+      ipv6: "{{ item.value.ipv6 | default(omit) }}"
+      alias_name: "{{ item.value.alias_name | default(omit) }}"
+      addr_method: "{{ item.value.addr_method | default(omit) }}"
+      speed: "{{ item.value.link_speed | default(omit) }}"
+      mtu: "{{ item.value.mtu | default(omit) }}"
+      clagd_enable: "{{ item.value.clagd_enable | default(omit) }}"
+      clagd_peer_ip: "{{ item.value.clagd_peer_ip | default(omit) }}"
+      clagd_sys_mac: "{{ item.value.clagd_sys_mac | default(omit) }}"
+      clagd_priority: "{{ item.value.clagd_priority | default(omit) }}"
+      vids: "{{ item.value.vids | default(omit) }}"
+      virtual_ip: "{{ item.value.virtual_ip | default(omit) }}"
+      virtual_mac: "{{ item.value.virtual_mac | default(omit) }}"
+      mstpctl_portnetwork: "{{ item.value.mstpctl_portnetwork | default('no') }}"
+      mstpctl_portadminedge: "{{ item.value.mstpctl_portadminedge | default('no') }}"
+      mstpctl_bpduguard: "{{ item.value.mstpctl_bpduguard | default('no') }}"
+    with_dict: "{{ cl_interfaces }}"
+    notify: reload networking
 
 
 # In vars file

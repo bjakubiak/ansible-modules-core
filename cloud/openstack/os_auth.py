@@ -22,6 +22,10 @@ try:
 except ImportError:
     HAS_SHADE = False
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: os_auth
@@ -37,10 +41,13 @@ extends_documentation_fragment: openstack
 '''
 
 EXAMPLES = '''
-# Authenticate to the cloud and retrieve the service catalog
-- os_auth:
+- name: Authenticate to the cloud and retrieve the service catalog
+  os_auth:
     cloud: rax-dfw
-- debug: var=service_catalog
+
+- name: Show service catalog
+  debug:
+    var: service_catalog
 '''
 
 def main():

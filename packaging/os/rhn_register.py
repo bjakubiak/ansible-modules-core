@@ -17,6 +17,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: rhn_register
@@ -83,30 +87,44 @@ options:
 
 EXAMPLES = '''
 # Unregister system from RHN.
-- rhn_register: state=absent username=joe_user password=somepass
+- rhn_register:
+    state: absent
+    username: joe_user
+    password: somepass
 
 # Register as user (joe_user) with password (somepass) and auto-subscribe to available content.
-- rhn_register: state=present username=joe_user password=somepass
+- rhn_register:
+    state: present
+    username: joe_user
+    password: somepass
 
 # Register with activationkey (1-222333444) and enable extended update support.
-- rhn_register: state=present activationkey=1-222333444 enable_eus=true
+- rhn_register:
+    state: present
+    activationkey: 1-222333444
+    enable_eus: true
 
 # Register with activationkey (1-222333444) and set a profilename which may differ from the hostname.
-- rhn_register: state=present activationkey=1-222333444 profilename=host.example.com.custom
+- rhn_register:
+    state: present
+    activationkey: 1-222333444
+    profilename: host.example.com.custom
 
 # Register as user (joe_user) with password (somepass) against a satellite
 # server specified by (server_url).
-- rhn_register: >
-    state=present
-    username=joe_user
-    password=somepass
-    server_url=https://xmlrpc.my.satellite/XMLRPC
+- rhn_register:
+    state: present
+    username: joe_user
+    password: somepass'
+    server_url: https://xmlrpc.my.satellite/XMLRPC
 
 # Register as user (joe_user) with password (somepass) and enable
 # channels (rhel-x86_64-server-6-foo-1) and (rhel-x86_64-server-6-bar-1).
-- rhn_register: state=present username=joe_user
-                password=somepass
-                channels=rhel-x86_64-server-6-foo-1,rhel-x86_64-server-6-bar-1
+- rhn_register:
+    state: present
+    username: joe_user
+    password: somepass
+    channels: rhel-x86_64-server-6-foo-1,rhel-x86_64-server-6-bar-1
 '''
 
 import sys
@@ -147,9 +165,10 @@ class Rhn(RegistrationBase):
         # configuration.  Yeah, I know this should be subclassed ... but, oh
         # well
         def get_option_default(self, key, default=''):
-            # ignore pep8 W601 errors for this line
-            # setting this to use 'in' does not work in the rhn library
-            if self.has_key(key):
+            # the class in rhn-client-tools that this comes from didn't
+            # implement __contains__() until 2.5.x.  That's why we check if
+            # the key is present in the dictionary that is the actual storage
+            if key in self.dict:
                 return self[key]
             else:
                 return default
@@ -407,4 +426,5 @@ def main():
             module.exit_json(changed=True, msg="System successfully unregistered from %s." % rhn.hostname)
 
 
-main()
+if __name__ == '__main__':
+    main()

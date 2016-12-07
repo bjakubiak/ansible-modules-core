@@ -15,6 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: group_by
@@ -34,7 +38,10 @@ notes:
 
 EXAMPLES = '''
 # Create groups based on the machine architecture
--  group_by: key=machine_{{ ansible_machine }}
+- group_by:
+    key: machine_{{ ansible_machine }}
+
 # Create groups like 'kvm-host'
--  group_by: key=virt_{{ ansible_virtualization_type }}_{{ ansible_virtualization_role }}
+- group_by:
+    key: virt_{{ ansible_virtualization_type }}_{{ ansible_virtualization_role }}
 '''

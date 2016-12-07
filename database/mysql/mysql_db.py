@@ -19,6 +19,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: mysql_db
@@ -78,18 +82,33 @@ extends_documentation_fragment: mysql
 '''
 
 EXAMPLES = '''
-# Create a new database with name 'bobdata'
-- mysql_db: name=bobdata state=present
+- name: Create a new database with name 'bobdata'
+  mysql_db:
+    name: bobdata
+    state: present
 
 # Copy database dump file to remote host and restore it to database 'my_db'
-- copy: src=dump.sql.bz2 dest=/tmp
-- mysql_db: name=my_db state=import target=/tmp/dump.sql.bz2
+- name: Copy database dump file
+  copy:
+    src: dump.sql.bz2
+    dest: /tmp
+- name: Restore database
+  mysql_db:
+    name: my_db
+    state: import
+    target: /tmp/dump.sql.bz2
 
-# Dumps all databases to hostname.sql
-- mysql_db: state=dump name=all target=/tmp/{{ inventory_hostname }}.sql
+- name: Dump all databases to hostname.sql
+  mysql_db:
+    state: dump
+    name: all
+    target: /tmp/{{ inventory_hostname }}.sql
 
-# Imports file.sql similiar to mysql -u <username> -p <password> < hostname.sql
-- mysql_db: state=import name=all target=/tmp/{{ inventory_hostname }}.sql
+- name: Import file.sql similar to mysql -u <username> -p <password> < hostname.sql
+  mysql_db:
+    state: import
+    name: all
+    target: /tmp/{{ inventory_hostname }}.sql
 '''
 
 import os
@@ -302,24 +321,27 @@ def main():
     if db_exists(cursor, db):
         if state == "absent":
             if module.check_mode:
-                changed = True
+                module.exit_json(changed=True, db=db)
             else:
                 try:
                     changed = db_delete(cursor, db)
                 except Exception:
                     e = get_exception()
                     module.fail_json(msg="error deleting database: " + str(e))
+                module.exit_json(changed=changed, db=db)
+
         elif state == "dump":
             if module.check_mode:
                 module.exit_json(changed=True, db=db)
             else:
                 rc, stdout, stderr = db_dump(module, login_host, login_user,
                                             login_password, db, target, all_databases,
-                                            login_port, config_file, socket, ssl_cert, ssl_key, ssl_ca)
+                                            login_port, config_file, socket, ssl_cert, ssl_key, ssl_ca, single_transaction, quick)
                 if rc != 0:
                     module.fail_json(msg="%s" % stderr)
                 else:
                     module.exit_json(changed=True, db=db, msg=stdout)
+
         elif state == "import":
             if module.check_mode:
                 module.exit_json(changed=True, db=db)
@@ -331,6 +353,12 @@ def main():
                     module.fail_json(msg="%s" % stderr)
                 else:
                     module.exit_json(changed=True, db=db, msg=stdout)
+
+        elif state == "present":
+            if module.check_mode:
+                module.exit_json(changed=False, db=db)
+            module.exit_json(changed=False, db=db)
+
     else:
         if state == "present":
             if module.check_mode:
@@ -341,8 +369,35 @@ def main():
                 except Exception:
                     e = get_exception()
                     module.fail_json(msg="error creating database: " + str(e))
+            module.exit_json(changed=changed, db=db)
 
-    module.exit_json(changed=changed, db=db)
+        elif state == "import":
+            if module.check_mode:
+                module.exit_json(changed=True, db=db)
+            else:
+                try:
+                    changed = db_create(cursor, db, encoding, collation)
+                    if changed:
+                        rc, stdout, stderr = db_import(module, login_host, login_user,
+                                                    login_password, db, target, all_databases,
+                                                    login_port, config_file, socket, ssl_cert, ssl_key, ssl_ca)
+                        if rc != 0:
+                            module.fail_json(msg="%s" % stderr)
+                        else:
+                            module.exit_json(changed=True, db=db, msg=stdout)
+                except Exception:
+                    e = get_exception()
+                    module.fail_json(msg="error creating database: " + str(e))
+
+        elif state == "absent":
+            if module.check_mode:
+                module.exit_json(changed=False, db=db)
+            module.exit_json(changed=False, db=db)
+
+        elif state == "dump":
+            if module.check_mode:
+                module.exit_json(changed=False, db=db)
+            module.fail_json(msg="Cannot dump database %s - not found" % (db))
 
 # import module snippets
 from ansible.module_utils.basic import *

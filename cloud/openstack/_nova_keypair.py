@@ -25,11 +25,15 @@ try:
 except ImportError:
     HAS_NOVACLIENT = False
 
+ANSIBLE_METADATA = {'status': ['deprecated'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: nova_keypair
 version_added: "1.2"
-author: 
+author:
     - "Benno Joy (@bennojoy)"
     - "Michael DeHaan"
 deprecated: Deprecated in 2.0. Use os_keypair instead
@@ -56,7 +60,7 @@ options:
      description:
         - The keystone url for authentication
      required: false
-     default: 'http://127.0.0.1:35357/v2.0/'
+     default: http://127.0.0.1:35357/v2.0/
    region_name:
      description:
         - Name of the region
@@ -83,14 +87,22 @@ requirements:
     - "python-novaclient"
 '''
 EXAMPLES = '''
-# Creates a key pair with the running users public key
-- nova_keypair: state=present login_username=admin
-                login_password=admin login_tenant_name=admin name=ansible_key
-                public_key={{ lookup('file','~/.ssh/id_rsa.pub') }}
+- name: Create a key pair with the running users public key
+  nova_keypair:
+    state: present
+    login_username: admin
+    login_password: admin
+    login_tenant_name: admin
+    name: ansible_key
+    public_key: "{{ lookup('file','~/.ssh/id_rsa.pub') }}"
 
-# Creates a new key pair and the private key returned after the run.
-- nova_keypair: state=present login_username=admin login_password=admin
-                login_tenant_name=admin name=ansible_key
+- name: Create a new key pair and the private key returned after the run.
+  nova_keypair:
+    state: present
+    login_username: admin
+    login_password: admin
+    login_tenant_name: admin
+    name: ansible_key
 '''
 
 def main():

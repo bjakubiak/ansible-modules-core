@@ -15,6 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = r'''
 ---
 module: win_template
@@ -57,8 +61,12 @@ author: "Jon Hawkesworth (@jhawkesworth)"
 '''
 
 EXAMPLES = '''
-# Playbook Example  (win_template can only be run inside a playbook)
-- win_template: src=/mytemplates/file.conf.j2 dest=C:\\temp\\file.conf
+# Playbook Example
+- win_template:
+    src: /mytemplates/file.conf.j2
+    dest: C:\temp\file.conf
 
+# Ad-hoc Example
+ansible winhost -m win_template -a "src=/mytemplates/file.conf.j2 dest=c:/temp/file.conf"
 
 '''

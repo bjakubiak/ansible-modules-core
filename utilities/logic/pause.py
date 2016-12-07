@@ -15,6 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: pause
@@ -27,12 +31,12 @@ version_added: "0.8"
 options:
   minutes:
     description:
-      - Number of minutes to pause for.
+      - A positive number of minutes to pause for.
     required: false
     default: null
   seconds:
     description:
-      - Number of seconds to pause for.
+      - A positive number of seconds to pause for.
     required: false
     default: null
   prompt:
@@ -41,15 +45,19 @@ options:
     required: false
     default: null
 author: "Tim Bielawa (@tbielawa)"
+notes:
+      - Starting in 2.2,  if you specify 0 or negative for minutes or seconds, it will wait for 1 second, previously it would wait indefinitely.
 '''
 
 EXAMPLES = '''
 # Pause for 5 minutes to build app cache.
-- pause: minutes=5
+- pause:
+    minutes: 5
 
 # Pause until you can verify updates to an application were successful.
 - pause:
 
 # A helpful reminder of what to look out for post-update.
-- pause: prompt="Make sure org.foo.FooOverload exception is not present"
+- pause:
+    prompt: "Make sure org.foo.FooOverload exception is not present"
 '''

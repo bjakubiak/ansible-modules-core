@@ -26,6 +26,10 @@ try:
 except ImportError:
     HAVE_DEPS = False
 
+ANSIBLE_METADATA = {'status': ['deprecated'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: quantum_network
@@ -59,7 +63,7 @@ options:
      description:
         - The keystone url for authentication
      required: false
-     default: 'http://127.0.0.1:35357/v2.0/'
+     default: http://127.0.0.1:35357/v2.0/
    region_name:
      description:
         - Name of the region
@@ -72,7 +76,7 @@ options:
      default: present
    name:
      description:
-        - Name to be assigned to the nework
+        - Name to be assigned to the network
      required: true
      default: None
    provider_network_type:
@@ -113,15 +117,26 @@ requirements:
 '''
 
 EXAMPLES = '''
-# Create a GRE backed Quantum network with tunnel id 1 for tenant1
-- quantum_network: name=t1network tenant_name=tenant1 state=present
-                   provider_network_type=gre provider_segmentation_id=1
-                   login_username=admin login_password=admin login_tenant_name=admin
+- name: Create a GRE backed Quantum network with tunnel id 1 for tenant1
+  quantum_network:
+    name: t1network
+    tenant_name: tenant1
+    state: present
+    provider_network_type: gre
+    provider_segmentation_id: 1
+    login_username: admin
+    login_password: admin
+    login_tenant_name: admin
 
-# Create an external network
-- quantum_network: name=external_network state=present
-                   provider_network_type=local router_external=yes
-                   login_username=admin login_password=admin login_tenant_name=admin
+- name: Create an external network
+  quantum_network:
+    name: external_network
+    state: present
+    provider_network_type: local
+    router_external: yes
+    login_username: admin
+    login_password: admin
+    login_tenant_name: admin
 '''
 
 _os_keystone = None

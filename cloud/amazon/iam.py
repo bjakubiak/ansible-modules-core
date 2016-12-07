@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: iam
@@ -78,7 +82,7 @@ options:
     default: '1'
   access_key_ids:
     description:
-      - A list of the keys that you want impacted by the access_key_state paramter.
+      - A list of the keys that you want impacted by the access_key_state parameter.
   groups:
     description:
       - A list of groups the user should belong to. When update, will gracefully remove groups not listed.
@@ -136,7 +140,7 @@ task:
     name: jdavila
     state: update
     groups: "{{ item.created_group.group_name }}"
-  with_items: new_groups.results
+  with_items: "{{ new_groups.results }}"
 
 # Example of role with custom trust policy for Lambda service
 - name: Create IAM role with custom trust relationship
@@ -334,7 +338,7 @@ def update_user(module, iam, name, new_name, new_path, key_state, key_count, key
             except boto.exception.BotoServerError as err:
                 error_msg = boto_exception(str(err))
                 if 'Password does not conform to the account password policy' in error_msg:
-                    module.fail_json(changed=False, msg="Passsword doesn't conform to policy")
+                    module.fail_json(changed=False, msg="Password doesn't conform to policy")
                 else:
                     module.fail_json(msg=error_msg)
 
@@ -391,7 +395,7 @@ def update_user(module, iam, name, new_name, new_path, key_state, key_count, key
 
 def set_users_groups(module, iam, name, groups, updated=None,
 new_name=None):
-    """ Sets groups for a user, will purge groups not explictly passed, while
+    """ Sets groups for a user, will purge groups not explicitly passed, while
         retaining pre-existing groups that also are in the new list.
     """
     changed = False
@@ -500,7 +504,7 @@ def create_role(module, iam, name, path, role_list, prof_list, trust_policy_doc)
                 path=path).create_role_response.create_role_result.role.role_name
 
             if name not in prof_list:
-                instance_profile_result = iam.create_instance_profile(name, 
+                instance_profile_result = iam.create_instance_profile(name,
                     path=path).create_instance_profile_response.create_instance_profile_result.instance_profile
                 iam.add_role_to_instance_profile(name, name)
     except boto.exception.BotoServerError as err:
@@ -624,7 +628,7 @@ def main():
 
     if iam_type == 'role' and state == 'update':
         module.fail_json(changed=False, msg="iam_type: role, cannot currently be updated, "
-                             "please specificy present or absent")
+                             "please specify present or absent")
 
     # check if trust_policy is present -- it can be inline JSON or a file path to a JSON file
     if trust_policy_filepath:
@@ -742,11 +746,12 @@ def main():
         group_exists = name in orig_group_list
 
         if state == 'present' and not group_exists:
-            new_group, changed = create_group(iam=iam, name=name, path=path)
+            new_group, changed = create_group(module=module, iam=iam, name=name, path=path)
             module.exit_json(changed=changed, group_name=new_group)
         elif state in ['present', 'update'] and group_exists:
             changed, updated_name, updated_path, cur_path = update_group(
-                iam=iam, name=name, new_name=new_name, new_path=new_path)
+                module=module, iam=iam, name=name, new_name=new_name,
+                new_path=new_path)
 
             if new_path and new_name:
                 module.exit_json(changed=changed, old_group_name=name,
@@ -768,11 +773,11 @@ def main():
 
         elif state == 'update' and not group_exists:
             module.fail_json(
-                changed=changed, msg="Update Failed. Group %s doesn't seem to exit!" % name)
+                changed=changed, msg="Update Failed. Group %s doesn't seem to exist!" % name)
 
         elif state == 'absent':
             if name in orig_group_list:
-                removed_group, changed = delete_group(iam=iam, name=name)
+                removed_group, changed = delete_group(module=module, iam=iam, name=name)
                 module.exit_json(changed=changed, delete_group=removed_group)
             else:
                 module.exit_json(changed=changed, msg="Group already absent")
@@ -794,4 +799,5 @@ def main():
 from ansible.module_utils.basic import *
 from ansible.module_utils.ec2 import *
 
-main()
+if __name__ == '__main__':
+    main()

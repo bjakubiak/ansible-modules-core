@@ -18,6 +18,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: fail
@@ -39,6 +43,7 @@ author: "Dag Wieers (@dagwieers)"
 
 EXAMPLES = '''
 # Example playbook using fail and when together
-- fail: msg="The system may not be provisioned according to the CMDB status."
+- fail:
+    msg: "The system may not be provisioned according to the CMDB status."
   when: cmdb_status != "to-be-staged"
 '''

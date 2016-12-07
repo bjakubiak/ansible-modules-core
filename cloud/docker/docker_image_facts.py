@@ -17,6 +17,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: docker_image_facts
@@ -57,7 +61,7 @@ EXAMPLES = '''
     name: pacur/centos-7
 
 - name: Inspect multiple images
-  docker_iamge_facts:
+  docker_image_facts:
     name:
       - pacur/centos-7
       - sinatra

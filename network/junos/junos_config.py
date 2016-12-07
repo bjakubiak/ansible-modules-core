@@ -16,45 +16,66 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = """
 ---
 module: junos_config
 version_added: "2.1"
 author: "Peter Sprygada (@privateip)"
-short_description: Manage configuration on remote devices running Junos
+short_description: Manage configuration on devices running Juniper JUNOS
 description:
-  - The M(junos_config) module provides an abstraction for working
-    with the configuration running on remote devices.  It can perform
-    operations that influence the configuration state.
-  - This module provides an implementation for configuring Juniper
-    JUNOS devices.  The configuration statements must start with either
-    `set` or `delete` and are compared against the current device
-    configuration and only changes are pushed to the device.
+  - This module provides an implementation for working with the active
+    configuration running on Juniper JUNOS devices.  It provides a set
+    of arguments for loading configuration, performing rollback operations
+    and zeroing the active configuration on the device.
 extends_documentation_fragment: junos
 options:
   lines:
     description:
-      - The path to the config source.  The source can be either a
-        file with config or a template that will be merged during
-        runtime.  By default the task will search for the source
-        file in role or playbook root folder in templates directory.
+      - This argument takes a list of C(set) or C(delete) configuration
+        lines to push into the remote device.  Each line must start with
+        either C(set) or C(delete).  This argument is mutually exclusive
+        with the I(src) argument.
     required: false
     default: null
+  src:
+    description:
+      - The I(src) argument provides a path to the configuration file
+        to load into the remote system.  The path can either be a full
+        system path to the configuration file if the value starts with /
+        or relative to the root of the implemented role or playbook.
+        This argument is mutually exclusive with the I(lines) argument.
+    required: false
+    default: null
+    version_added: "2.2"
+  src_format:
+    description:
+      - The I(src_format) argument specifies the format of the configuration
+        found int I(src).  If the I(src_format) argument is not provided,
+        the module will attempt to determine the format of the configuration
+        file specified in I(src).
+    required: false
+    default: null
+    choices: ['xml', 'set', 'text', 'json']
+    version_added: "2.2"
   rollback:
     description:
       - The C(rollback) argument instructs the module to rollback the
         current configuration to the identifier specified in the
         argument.  If the specified rollback identifier does not
         exist on the remote device, the module will fail.  To rollback
-        to the most recent commit, set the C(rollback) argument to 0
+        to the most recent commit, set the C(rollback) argument to 0.
     required: false
     default: null
   zeroize:
     description:
-      - The C(zeroize) argument is used to completely ssantaize the
+      - The C(zeroize) argument is used to completely sanitize the
         remote device configuration back to initial defaults.  This
         argument will effectively remove all current configuration
-        statements on the remote device
+        statements on the remote device.
     required: false
     default: null
   confirm:
@@ -77,130 +98,250 @@ options:
     description:
       - The C(replace) argument will instruct the remote device to
         replace the current configuration hierarchy with the one specified
-        in the corresponding hierarchy of the source configuraiton loaded
+        in the corresponding hierarchy of the source configuration loaded
         from this module.
-    required: true
+      - Note this argument should be considered deprecated.  To achieve
+        the equivalent, set the I(update) argument to C(replace).  This argument
+        will be removed in a future release.
+    required: false
+    choices: ['yes', 'no']
     default: false
+  backup:
+    description:
+      - This argument will cause the module to create a full backup of
+        the current C(running-config) from the remote device before any
+        changes are made.  The backup file is written to the C(backup)
+        folder in the playbook root directory.  If the directory does not
+        exist, it is created.
+    required: false
+    default: no
+    choices: ['yes', 'no']
+    version_added: "2.2"
 requirements:
   - junos-eznc
 notes:
   - This module requires the netconf system service be enabled on
-    the remote device being managed
+    the remote device being managed.
 """
 
 EXAMPLES = """
-- name: load configuration lines in device
+# Note: examples below use the following provider dict to handle
+#       transport and authentication to the node.
+vars:
+  netconf:
+    host: "{{ inventory_hostname }}"
+    username: ansible
+    password: Ansible
+
+- name: load configure file into device
   junos_config:
-    lines:
-      - set system host-name {{ inventory_hostname }}
-      - delete interfaces ge-0/0/0 description
+    src: srx.cfg
     comment: update config
+    provider: "{{ netconf }}"
 
 - name: rollback the configuration to id 10
   junos_config:
     rollback: 10
+    provider: "{{ netconf }}"
 
 - name: zero out the current configuration
   junos_config:
     zeroize: yes
+    provider: "{{ netconf }}"
 
-- name: confirm a candidate configuration
+- name: confirm a previous commit
   junos_config:
+    provider: "{{ netconf }}"
 """
 
-import re
+RETURN = """
+backup_path:
+  description: The full path to the backup file
+  returned: when backup is yes
+  type: path
+  sample: /playbooks/ansible/backup/config.2016-07-16@22:28:34
+"""
+import json
+
+from xml.etree import ElementTree
+
+import ansible.module_utils.junos
+
+from ansible.module_utils.basic import get_exception
+from ansible.module_utils.network import NetworkModule, NetworkError
+from ansible.module_utils.netcfg import NetworkConfig
+
 
 DEFAULT_COMMENT = 'configured by junos_config'
 
-def diff_config(candidate, config):
 
-    updates = set()
+def guess_format(config):
+    try:
+        json.loads(config)
+        return 'json'
+    except ValueError:
+        pass
 
-    for line in candidate:
-        parts = line.split()
-        action = parts[0]
-        cfgline = ' '.join(parts[1:])
+    try:
+        ElementTree.fromstring(config)
+        return 'xml'
+    except ElementTree.ParseError:
+        pass
 
-        if action not in ['set', 'delete']:
-            module.fail_json(msg='line must start with either `set` or `delete`')
+    if config.startswith('set') or config.startswith('delete'):
+        return 'set'
 
-        elif action == 'set' and cfgline not in config:
-            updates.add(line)
+    return 'text'
 
-        elif action == 'delete' and not config:
-            updates.add(line)
+def config_to_commands(config):
+    set_format = config.startswith('set') or config.startswith('delete')
+    candidate = NetworkConfig(indent=4, contents=config, device_os='junos')
+    if not set_format:
+        candidate = [c.line for c in candidate.items]
+        commands = list()
+        # this filters out less specific lines
+        for item in candidate:
+            for index, entry in enumerate(commands):
+                if item.startswith(entry):
+                    del commands[index]
+                    break
+            commands.append(item)
 
-        elif action == 'delete':
-            for cfg in config:
-                if cfg.startswith(cfgline):
-                    updates.add(cfgline)
+    else:
+        commands = str(candidate).split('\n')
 
-    return list(updates)
+    return commands
+
+def diff_commands(commands, config):
+    config = [unicode(c).replace("'", '') for c in config]
+
+    updates = list()
+    visited = set()
+
+    for item in commands:
+        if len(item) > 0:
+            if not item.startswith('set') and not item.startswith('delete'):
+                raise ValueError('line must start with either `set` or `delete`')
+
+            elif item.startswith('set') and item[4:] not in config:
+                updates.append(item)
+
+            elif item.startswith('delete'):
+                for entry in config:
+                    if entry.startswith(item[7:]) and item not in visited:
+                        updates.append(item)
+                        visited.add(item)
+
+    return updates
+
+def load_config(module, result):
+    candidate =  module.params['lines'] or module.params['src']
+    if isinstance(candidate, basestring):
+        candidate = candidate.split('\n')
+
+    kwargs = dict()
+    kwargs['comment'] = module.params['comment']
+    kwargs['confirm'] = module.params['confirm']
+    kwargs['replace'] = module.params['replace']
+    kwargs['commit'] = not module.check_mode
+
+    if module.params['src']:
+        config_format = module.params['src_format'] or guess_format(str(candidate))
+    elif module.params['lines']:
+        config_format = 'set'
+    kwargs['config_format'] = config_format
+
+    # this is done to filter out `delete ...` statements which map to
+    # nothing in the config as that will cause an exception to be raised
+    if config_format == 'set':
+        config = module.config.get_config()
+        config = config_to_commands(config)
+        candidate = diff_commands(candidate, config)
+
+    diff = module.config.load_config(candidate, **kwargs)
+
+    if diff:
+        result['changed'] = True
+        result['diff'] = dict(prepared=diff)
+
+def rollback_config(module, result):
+    rollback = module.params['rollback']
+
+    kwargs = dict(comment=module.param['comment'],
+                  commit=not module.check_mode)
+
+    diff = module.connection.rollback_config(rollback, **kwargs)
+
+    if diff:
+        result['changed'] = True
+        result['diff'] = dict(prepared=diff)
+
+def zeroize_config(module, result):
+    if not module.check_mode:
+        module.cli.run_commands('request system zeroize')
+    result['changed'] = True
+
+def confirm_config(module, result):
+    checkonly = module.check_mode
+    result['changed'] = module.connection.confirm_commit(checkonly)
+
+def run(module, result):
+    if module.params['rollback']:
+        return rollback_config(module, result)
+    elif module.params['zeroize']:
+        return zeroize_config(module, result)
+    elif not any((module.params['src'], module.params['lines'])):
+        return confirm_config(module, result)
+    else:
+        return load_config(module, result)
+
 
 def main():
-
+    """ main entry point for module execution
+    """
     argument_spec = dict(
         lines=dict(type='list'),
-        rollback=dict(type='int'),
-        zeroize=dict(default=False, type='bool'),
+
+        src=dict(type='path'),
+        src_format=dict(choices=['xml', 'text', 'set', 'json']),
+
+        # update operations
+        replace=dict(default=False, type='bool'),
         confirm=dict(default=0, type='int'),
         comment=dict(default=DEFAULT_COMMENT),
-        replace=dict(default=False, type='bool'),
+
+        # config operations
+        backup=dict(type='bool', default=False),
+        rollback=dict(type='int'),
+        zeroize=dict(default=False, type='bool'),
+
         transport=dict(default='netconf', choices=['netconf'])
     )
 
     mutually_exclusive = [('lines', 'rollback'), ('lines', 'zeroize'),
-                          ('rollback', 'zeroize')]
+                          ('rollback', 'zeroize'), ('lines', 'src'),
+                          ('src', 'zeroize'), ('src', 'rollback')]
 
-    module = get_module(argument_spec=argument_spec,
-                        mutually_exclusive=mutually_exclusive,
-                        supports_check_mode=True)
+    required_if = [('replace', True, ['src'])]
 
-    rollback = module.params['rollback']
-    zeroize = module.params['zeroize']
+    module = NetworkModule(argument_spec=argument_spec,
+                           mutually_exclusive=mutually_exclusive,
+                           required_if=required_if,
+                           supports_check_mode=True)
 
-    comment = module.params['comment']
-    confirm = module.params['confirm']
+    result = dict(changed=False)
 
-    if module.params['replace']:
-        action = 'replace'
-    else:
-        action = 'merge'
+    if module.params['backup']:
+        result['__backup__'] = module.config.get_config()
 
-    lines = module.params['lines']
-    commit = not module.check_mode
+    try:
+        run(module, result)
+    except NetworkError:
+        exc = get_exception()
+        module.fail_json(msg=str(exc), **exc.kwargs)
 
-    results = dict(changed=False)
+    module.exit_json(**result)
 
-    if lines:
-        config = str(module.get_config(config_format='set')).split('\n')
-        updates = diff_config(lines, config)
-
-        if updates:
-            updates = '\n'.join(updates)
-            diff = module.load_config(updates, action=action, comment=comment,
-                    format='set', commit=commit, confirm=confirm)
-
-            if diff:
-                results['changed'] = True
-                results['diff'] = dict(prepared=diff)
-
-    elif rollback is not None:
-        diff = module.rollback_config(rollback, commit=commit)
-        if diff:
-            results['changed'] = True
-            results['diff'] = dict(prepared=diff)
-
-    elif zeroize:
-        if not module.check_mode:
-            module.run_commands('request system zeroize')
-        results['changed'] = True
-
-    module.exit_json(**results)
-
-
-from ansible.module_utils.basic import *
-from ansible.module_utils.junos import *
 
 if __name__ == '__main__':
     main()

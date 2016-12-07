@@ -30,6 +30,10 @@ try:
 except ImportError:
     HAS_NOVACLIENT = False
 
+ANSIBLE_METADATA = {'status': ['deprecated'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: nova_compute
@@ -58,7 +62,7 @@ options:
      description:
         - The keystone url for authentication
      required: false
-     default: 'http://127.0.0.1:35357/v2.0/'
+     default: http://127.0.0.1:35357/v2.0/
    region_name:
      description:
         - Name of the region
@@ -543,17 +547,17 @@ def main():
         flavor_include                  = dict(default=None),
         key_name                        = dict(default=None),
         security_groups                 = dict(default='default'),
-        nics                            = dict(default=None),
-        meta                            = dict(default=None),
+        nics                            = dict(default=None, type='list'),
+        meta                            = dict(default=None, type='dict'),
         wait                            = dict(default='yes', choices=['yes', 'no']),
         wait_for                        = dict(default=180),
         state                           = dict(default='present', choices=['absent', 'present']),
         user_data                       = dict(default=None),
         config_drive                    = dict(default=False, type='bool'),
         auto_floating_ip                = dict(default=False, type='bool'),
-        floating_ips                    = dict(default=None),
-        floating_ip_pools               = dict(default=None),
-        scheduler_hints                 = dict(default=None),
+        floating_ips                    = dict(default=None, type='list'),
+        floating_ip_pools               = dict(default=None, type='list'),
+        scheduler_hints                 = dict(default=None, type='dict'),
     ))
     module = AnsibleModule(
         argument_spec=argument_spec,

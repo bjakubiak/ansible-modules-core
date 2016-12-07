@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'committer',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: ec2_vpc
@@ -270,7 +274,7 @@ def rtb_changed(route_tables=None, vpc_conn=None, module=None, vpc=None, igw=Non
     Checks if the remote routes match the local routes.
 
     route_tables : Route_tables parameter in the module
-    vpc_conn     : The VPC conection object
+    vpc_conn     : The VPC connection object
     module       : The module object
     vpc          : The vpc object for this route table
     igw          : The internet gateway object for this vpc
@@ -408,7 +412,7 @@ def create_vpc(module, vpc_conn):
         for subnet in subnets:
             add_subnet = True
             subnet_tags_current = True
-            new_subnet_tags = subnet.get('resource_tags', None)
+            new_subnet_tags = subnet.get('resource_tags', {})
             subnet_tags_delete = []
 
             for csn in current_subnets:
@@ -444,7 +448,7 @@ def create_vpc(module, vpc_conn):
             if add_subnet:
                 try:
                     new_subnet = vpc_conn.create_subnet(vpc.id, subnet['cidr'], subnet.get('az', None))
-                    new_subnet_tags = subnet.get('resource_tags', None)
+                    new_subnet_tags = subnet.get('resource_tags', {})
                     if new_subnet_tags:
                         # Sometimes AWS takes its time to create a subnet and so using new subnets's id
                         # to create tags results in exception.
@@ -503,7 +507,7 @@ def create_vpc(module, vpc_conn):
 
     # Handle route tables - this may be worth splitting into a
     # different module but should work fine here. The strategy to stay
-    # indempotent is to basically build all the route tables as
+    # idempotent is to basically build all the route tables as
     # defined, track the route table ids, and then run through the
     # remote list of route tables and delete any that we didn't
     # create.  This shouldn't interrupt traffic in theory, but is the
@@ -742,4 +746,5 @@ def main():
 from ansible.module_utils.basic import *
 from ansible.module_utils.ec2 import *
 
-main()
+if __name__ == '__main__':
+    main()

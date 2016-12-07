@@ -19,6 +19,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
 
+ANSIBLE_METADATA = {'status': ['stableinterface'],
+                    'supported_by': 'core',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: win_copy
@@ -47,32 +51,29 @@ author: "Jon Hawkesworth (@jhawkesworth)"
 '''
 
 EXAMPLES = '''
-# Copy a single file
-- win_copy: src=/srv/myfiles/foo.conf dest=c:\\TEMP\\foo.conf
+- name: Copy a single file
+  win_copy:
+    src: /srv/myfiles/foo.conf
+    dest: c:\TEMP\foo.conf
 
-# Copy the contents of files/temp_files dir into c:\temp\.  Includes any sub dirs under files/temp_files
-# Note the use of unix style path in the dest.  
-# This is necessary because \ is yaml escape sequence
-- win_copy: src=files/temp_files/ dest=c:/temp/
-
-# Copy the files/temp_files dir and any files or sub dirs into c:\temp
-# Copies the folder because there is no trailing / on 'files/temp_files'
-- win_copy: src=files/temp_files dest=c:/temp/
-
+- name: Copy files/temp_files to c:\temp
+  win_copy:
+    src: files/temp_files/
+    dest: c:\temp
 '''
 RETURN = '''
 dest:
     description: destination file/path
     returned: changed
     type: string
-    sample: "c:/temp/"
+    sample: 'c:\temp'
 src:
     description: source file used for the copy on the target machine
     returned: changed
     type: string
     sample: "/home/httpd/.ansible/tmp/ansible-tmp-1423796390.97-147729857856000/source"
 checksum:
-    description: checksum of the file after running copy
+    description: sha1 checksum of the file after running copy
     returned: success
     type: string
     sample: "6e642bb8dd5c2e027bf21dd923337cbb4214f827"

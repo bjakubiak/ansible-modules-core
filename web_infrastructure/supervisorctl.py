@@ -19,6 +19,11 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 import os
+from ansible.module_utils.basic import AnsibleModule, is_executable
+
+ANSIBLE_METADATA = {'status': ['preview'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
 
 DOCUMENTATION = '''
 ---
@@ -82,16 +87,28 @@ author:
 
 EXAMPLES = '''
 # Manage the state of program to be in 'started' state.
-- supervisorctl: name=my_app state=started
+- supervisorctl:
+    name: my_app
+    state: started
 
 # Manage the state of program group to be in 'started' state.
-- supervisorctl: name='my_apps:' state=started
+- supervisorctl:
+    name: 'my_apps:'
+    state: started
 
 # Restart my_app, reading supervisorctl configuration from a specified file.
-- supervisorctl: name=my_app state=restarted config=/var/opt/my_project/supervisord.conf
+- supervisorctl:
+    name: my_app
+    state: restarted
+    config: /var/opt/my_project/supervisord.conf
 
 # Restart my_app, connecting to supervisord with credentials and server URL.
-- supervisorctl: name=my_app state=restarted username=test password=testpass server_url=http://localhost:9001
+- supervisorctl:
+    name: my_app
+    state: restarted
+    username: test
+    password: testpass
+    server_url: http://localhost:9001
 '''
 
 
@@ -101,7 +118,7 @@ def main():
         config=dict(required=False, type='path'),
         server_url=dict(required=False),
         username=dict(required=False),
-        password=dict(required=False),
+        password=dict(required=False, no_log=True),
         supervisorctl_path=dict(required=False, type='path'),
         state=dict(required=True, choices=['present', 'started', 'restarted', 'stopped', 'absent'])
     )
@@ -239,8 +256,5 @@ def main():
             module.fail_json(name=name, msg="ERROR (no such process)")
         take_action_on_processes(processes, lambda s: s in ('RUNNING', 'STARTING'), 'stop', 'stopped')
 
-# import module snippets
-from ansible.module_utils.basic import *
-# is_executable from basic
 if __name__ == '__main__':
     main()

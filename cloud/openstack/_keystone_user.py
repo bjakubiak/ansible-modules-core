@@ -17,6 +17,10 @@
 
 # Based on Jimmy Tang's implementation
 
+ANSIBLE_METADATA = {'status': ['deprecated'],
+                    'supported_by': 'community',
+                    'version': '1.0'}
+
 DOCUMENTATION = '''
 ---
 module: keystone_user
@@ -51,7 +55,7 @@ options:
      description:
         - The keystone url for authentication
      required: false
-     default: 'http://127.0.0.1:35357/v2.0/'
+     default: http://127.0.0.1:35357/v2.0/
    user:
      description:
         - The name of the user that has to added/removed from OpenStack
@@ -94,14 +98,22 @@ author: "Ansible Core Team (deprecated)"
 '''
 
 EXAMPLES = '''
-# Create a tenant
-- keystone_user: tenant=demo tenant_description="Default Tenant"
+- name: Create a tenant
+  keystone_user:
+    tenant: demo
+    tenant_description: "Default Tenant"
 
-# Create a user
-- keystone_user: user=john tenant=demo password=secrete
+- name: Create a user
+  keystone_user:
+    user: john
+    tenant: demo
+    password: secrete
 
-# Apply the admin role to the john user in the demo tenant
-- keystone_user: role=admin user=john tenant=demo
+- name: Apply the admin role to the john user in the demo tenant
+  keystone_user:
+    role: admin
+    user: john
+    tenant: demo
 '''
 
 try:
@@ -229,7 +241,7 @@ def ensure_user_exists(keystone, user_name, password, email, tenant_name,
                        check_mode):
     """ Check if user exists
 
-        Return (True, id) if a new user was created, (False, id) user alrady
+        Return (True, id) if a new user was created, (False, id) user already
         exists
     """
 
